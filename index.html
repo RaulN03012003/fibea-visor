@@ -215,13 +215,15 @@ function selectTrade(i){
   slLine.setData(t.sl_steps.map(s=>({time:s.t, value:s.p})));
 
   // linea punteada "en L" (como en MT5): horizontal al precio de ENTRADA hasta el cierre,
-  // y ahi un salto vertical hasta el precio de SALIDA -- mas clara que una diagonal recta,
-  // porque no insinua un movimiento de precio que no existio.
-  tradeLine.setData([
-    {time:t.entry_t, value:t.entry_p},
-    {time:end,       value:t.entry_p},
-    {time:end,       value:endPrice}
-  ]);
+  // y ahi un salto vertical hasta el precio de SALIDA. IMPORTANTE: Lightweight Charts exige
+  // tiempos ESTRICTAMENTE ascendentes en una serie -- dos puntos con el mismo "time" (el salto
+  // vertical) tiraban un error interno ("Value is null") que rompia el repintado de TODO el
+  // grafico, no solo esta linea. Por eso el punto medio va 1 segundo antes del cierre.
+  const midT = (end - t.entry_t > 1) ? end - 1 : null;
+  const trPts = [{time:t.entry_t, value:t.entry_p}];
+  if(midT !== null && midT > t.entry_t) trPts.push({time:midT, value:t.entry_p});
+  trPts.push({time:end, value:endPrice});
+  tradeLine.setData(trPts);
 
   // --- solo 2-3 lineas de precio en el grafico (SL0, SL actual, Entrada) para no saturar ---
   clearPriceLines();

@@ -249,18 +249,12 @@ function selectTrade(i){
     }));
   }
 
-  // enfocar rango alrededor del trade, por INDICE de vela (no por tiempo+pad):
-  // con huecos de fin de semana, un rango por tiempo puede caer fuera de datos reales
-  // y dejar el grafico en blanco. Por indice siempre cae dentro del array de velas.
-  const candles = D.symbols[curSym].candles;
-  const idxAtOrAfter = (ts) => { let lo=0, hi=candles.length-1, ans=candles.length-1;
-    while(lo<=hi){ const mid=(lo+hi)>>1; if(candles[mid].t>=ts){ans=mid; hi=mid-1;} else lo=mid+1; } return ans; };
-  const iEntry = idxAtOrAfter(t.entry_t);
-  const iEnd   = t.exit_t ? idxAtOrAfter(t.exit_t) : candles.length-1;
-  const padBars = 15;
-  chart.timeScale().setVisibleLogicalRange({
-    from: Math.max(0, iEntry-padBars), to: Math.min(candles.length-1, iEnd+padBars)
-  });
+  // NOTA: se probaron 2 formas de auto-enfocar el rango del trade (por tiempo+pad,
+  // y por indice de vela) y ambas a veces dejaban el grafico en blanco por bugs de
+  // redondeo con la libreria. fitContent() es el metodo que siempre funciono bien:
+  // muestra todo el historial y el usuario hace zoom/scroll manual hasta el trade
+  // (rueda del mouse = zoom, arrastrar = desplazar, como dice la ayuda debajo de la tabla).
+  chart.timeScale().fitContent();
   detail(t, i);
 }
 
@@ -321,13 +315,28 @@ function buildSummary(){
   const winrate = cerradas.length ? (wins.length/cerradas.length*100) : 0;
   const sumPos = wins.reduce((a,t)=>a+t.pnl,0), sumNeg = losses.reduce((a,t)=>a+t.pnl,0);
   const pf = sumNeg!==0 ? (sumPos/Math.abs(sumNeg)) : (sumPos>0?Infinity:0);
+  const avgWin  = wins.length ? sumPos/wins.length : 0;
+  const avgLoss = losses.length ? sumNeg/losses.length : 0;
+  const expectancy = cerradas.length ? (sumPos+sumNeg)/cerradas.length : 0;
+  const best  = cerradas.reduce((a,t)=> (!a||t.pnl>a.pnl)?t:a, null);
+  const worst = cerradas.reduce((a,t)=> (!a||t.pnl<a.pnl)?t:a, null);
+  const avgDurH = cerradas.length ? cerradas.reduce((a,t)=>a+(t.exit_t-t.entry_t),0)/cerradas.length/3600 : 0;
 
   // curva de equity combinada (solo trades cerradas, ordenadas por cierre)
   const cronoCierre = cerradas.slice().sort((a,b)=>a.exit_t-b.exit_t);
   let run = capIni;
   const eq = [{time: (cronoCierre[0]?.entry_t)||0, value: capIni}];
-  let peak=capIni, maxDD=0;
-  cronoCierre.forEach(t=>{ run+=t.pnl; eq.push({time:t.exit_t, value:run}); peak=Math.max(peak,run); maxDD=Math.max(maxDD,peak-run); });
+  let peak=capIni, maxDD=0, maxDDpct=0;
+  // rachas maximas de wins/losses consecutivas (en el orden en que fueron cerrando)
+  let rachaW=0, rachaL=0, maxRachaW=0, maxRachaL=0;
+  cronoCierre.forEach(t=>{
+    run+=t.pnl; eq.push({time:t.exit_t, value:run});
+    peak=Math.max(peak,run);
+    const dd = peak-run; maxDD=Math.max(maxDD,dd);
+    maxDDpct = Math.max(maxDDpct, peak>0 ? dd/peak*100 : 0);
+    if(t.pnl>0){ rachaW++; rachaL=0; } else { rachaL++; rachaW=0; }
+    maxRachaW=Math.max(maxRachaW,rachaW); maxRachaL=Math.max(maxRachaL,rachaL);
+  });
 
   // distribucion P&L por simbolo
   const bySym = SYMS.map((s,i)=>({
@@ -336,7 +345,8 @@ function buildSummary(){
     n: (D.symbols[s].trades||[]).length
   }));
 
-  renderSummaryHTML({capIni,capAct,moneda,pnlTotal,pnlPct,winrate,pf,maxDD,
+  renderSummaryHTML({capIni,capAct,moneda,pnlTotal,pnlPct,winrate,pf,maxDD,maxDDpct,
+                      avgWin,avgLoss,expectancy,best,worst,avgDurH,maxRachaW,maxRachaL,
                       nCerradas:cerradas.length, nAbiertas:abiertas.length, eq, bySym, trades});
 }
 
@@ -370,7 +380,7 @@ function renderSummaryHTML(S){
       <div class="kpi"><div class="lbl">Abiertas ahora</div><div class="val">${S.nAbiertas}</div></div>
       <div class="kpi"><div class="lbl">Winrate</div><div class="val">${fmt(S.winrate,1)}%</div></div>
       <div class="kpi"><div class="lbl">Profit Factor</div><div class="val">${S.pf===Infinity?'∞':fmt(S.pf,2)}</div></div>
-      <div class="kpi"><div class="lbl">Drawdown máx</div><div class="val" style="color:#ef5350">${fmt(S.maxDD,2)} ${S.moneda}</div></div>
+      <div class="kpi"><div class="lbl">Drawdown máx</div><div class="val" style="color:#ef5350">${fmt(S.maxDDpct,1)}%<span style="font-size:11px;color:var(--muted);font-weight:400"> (${fmt(S.maxDD,2)} ${S.moneda})</span></div></div>
     </div>
 
     <div class="sumGrid">
@@ -383,6 +393,20 @@ function renderSummaryHTML(S){
             `<span class="${b.pnl>=0?'pos':'neg'}">${fmt(b.pnl,2)} ${S.moneda}</span> (${b.n} ops)</div>`).join('')}
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:22px">
+      <h3>Estadísticas avanzadas</h3>
+      <div class="kpis" style="margin:0">
+        <div class="kpi"><div class="lbl">Ganancia media</div><div class="val pos">${fmt(S.avgWin,2)} ${S.moneda}</div></div>
+        <div class="kpi"><div class="lbl">Pérdida media</div><div class="val neg">${fmt(S.avgLoss,2)} ${S.moneda}</div></div>
+        <div class="kpi"><div class="lbl">Expectancia / trade</div><div class="val ${S.expectancy>=0?'pos':'neg'}">${fmt(S.expectancy,2)} ${S.moneda}</div></div>
+        <div class="kpi"><div class="lbl">Duración media</div><div class="val">${fmt(S.avgDurH,0)} h</div></div>
+        <div class="kpi"><div class="lbl">Mejor operación</div><div class="val pos">${S.best?fmt(S.best.pnl,2):'–'} ${S.moneda}</div></div>
+        <div class="kpi"><div class="lbl">Peor operación</div><div class="val neg">${S.worst?fmt(S.worst.pnl,2):'–'} ${S.moneda}</div></div>
+        <div class="kpi"><div class="lbl">Racha máx. ganadora</div><div class="val pos">${S.maxRachaW}</div></div>
+        <div class="kpi"><div class="lbl">Racha máx. perdedora</div><div class="val neg">${S.maxRachaL}</div></div>
       </div>
     </div>
 

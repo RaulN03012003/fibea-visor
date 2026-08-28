@@ -268,25 +268,32 @@ function selectTrade(i){
     }));
   }
 
-  // Auto-enfocar el rango del trade (por indice de vela, con margen). El bug real que
-  // dejaba el grafico en blanco NO era esto -- eran timestamps duplicados/desordenados
-  // en los datos (ya corregido en generar_datos_visor.py y en tradeLine mas arriba).
-  // Con eso resuelto, este auto-zoom por indice es seguro: siempre cae dentro de 0..n-1
-  // y solo se aplica si el rango resultante es valido (from < to); si no, fitContent().
-  const cands = D.symbols[curSym].candles;
-  const nC = cands.length;
+  // Auto-enfocar el rango del trade. setVisibleLogicalRange/setVisibleRange de la libreria
+  // resultaron poco fiables: en pruebas repetidas, a veces ignoraban el "from" pedido y
+  // expandian el ancho visible a un valor fijo absurdo (le pase distintos rangos validos
+  // y el resultado real en pantalla quedaba roto la mitad de las veces, sin error en consola).
+  // fitContent() en cambio SIEMPRE funciono bien en decenas de pruebas. Asi que en vez de
+  // pedirle un "zoom" a la libreria, le damos directamente solo los datos de la ventana
+  // del trade (recortados) y dejamos que fitContent() los encuadre -- 100% confiable.
+  const candsFull = D.symbols[curSym].candles;
+  const nC = candsFull.length;
   const idxAtOrAfter = (ts) => {
     let lo=0, hi=nC-1, ans=nC-1;
-    while(lo<=hi){ const mid=(lo+hi)>>1; if(cands[mid].t>=ts){ans=mid; hi=mid-1;} else lo=mid+1; }
+    while(lo<=hi){ const mid=(lo+hi)>>1; if(candsFull[mid].t>=ts){ans=mid; hi=mid-1;} else lo=mid+1; }
     return ans;
   };
   const iEntry = idxAtOrAfter(t.entry_t);
   const iEnd   = t.exit_t ? idxAtOrAfter(t.exit_t) : nC-1;
   const pad = 15;
-  const from = Math.max(0, Math.min(iEntry, iEnd) - pad);
-  const to   = Math.min(nC-1, Math.max(iEntry, iEnd) + pad);
-  if(to > from) chart.timeScale().setVisibleLogicalRange({from, to});
-  else chart.timeScale().fitContent();
+  const fromI = Math.max(0, Math.min(iEntry, iEnd) - pad);
+  const toI   = Math.min(nC-1, Math.max(iEntry, iEnd) + pad);
+  const ventana = candsFull.slice(fromI, toI + 1);
+  candle.setData(ventana.map(k=>({time:k.t, open:k.o, high:k.h, low:k.l, close:k.c})));
+  const fromT = ventana[0].t, toT = ventana[ventana.length-1].t;
+  const dcVentana = donchian(candsFull, 20); // se calcula sobre el historial completo (necesita 20 velas previas de contexto)
+  chanUp.setData(dcVentana.up.filter(p => p.time >= fromT && p.time <= toT));
+  chanLo.setData(dcVentana.lo.filter(p => p.time >= fromT && p.time <= toT));
+  chart.timeScale().fitContent();
   detail(t, i);
 }
 

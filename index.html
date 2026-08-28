@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>FibEA · Visor del bot BreakoutPortfolio</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root{ --bg:#000000; --pane:#000000; --grid:#1a1a1a; --txt:#c9d4e5; --muted:#8a8a8a;
+         --up:#26c6a6; --dn:#ef5350; --chan:#c83cff; --chanlo:#9660ff; --sl:#2979ff; --red:#f2555a; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:Segoe UI,Arial,sans-serif;font-size:13px}
+  header{display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--grid);flex-wrap:wrap}
+  header h1{font-size:15px;margin:0;color:#eaf0fa;font-weight:700}
+  .gen{color:var(--muted);font-size:11px}
+  .tabs{display:flex;gap:6px;margin-left:6px}
+  .tab{padding:5px 14px;border:1px solid var(--grid);border-radius:6px;background:#111;color:var(--txt);cursor:pointer;font-weight:600}
+  .tab.active{background:#232323;border-color:#444;color:#eaf3ff}
+  .wrap{display:flex;height:calc(100vh - 52px)}
+  #chart{flex:1;position:relative}
+  aside{width:330px;border-left:1px solid var(--grid);overflow:auto;padding:10px 12px}
+  aside h2{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:6px 0}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 6px;text-align:right;border-bottom:1px solid #16202f;font-size:12px}
+  th{color:var(--muted);font-weight:600;text-align:right}
+  td.l,th.l{text-align:left}
+  tr.trow{cursor:pointer}
+  tr.trow:hover{background:#132135}
+  tr.trow.sel{background:#1b3350}
+  .pos{color:var(--up)} .neg{color:var(--dn)}
+  .pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:700}
+  .buy{background:#12352b;color:#4fe0b6} .sell{background:#3a1f22;color:#ff8a8f}
+  .legend{position:absolute;top:8px;left:10px;z-index:5;background:rgba(0,0,0,.82);border:1px solid var(--grid);
+          border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.5;pointer-events:none}
+  .legend b{color:#eaf0fa} .sw{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
+  .hint{color:var(--muted);font-size:11px;margin-top:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>FibEA · Visor BreakoutPortfolio</h1>
+  <div class="tabs" id="tabs"></div>
+  <div class="gen" id="gen"></div>
+</header>
+<div class="wrap">
+  <div id="chart">
+    <div class="legend" id="legend"></div>
+  </div>
+  <aside>
+    <h2>Operaciones</h2>
+    <table id="tbl"><thead><tr>
+      <th class="l">#</th><th class="l">Dir</th><th>Entrada</th><th>Salida</th><th>P&amp;L</th><th>R</th>
+    </tr></thead><tbody id="tbody"></tbody></table>
+    <div class="hint">Clic en una operación para enfocarla y ver su escalera de SL (SL0→SLk). Rueda del mouse = zoom · arrastrar = desplazar.</div>
+    <div id="detail" style="margin-top:12px"></div>
+  </aside>
+</div>
+
+<script>document.write('<scr'+'ipt src="data.js?v='+Date.now()+'"><\/scr'+'ipt>');</script>
+<script>
+const D = window.FIBEA_DATA || {symbols:{}, generado:""};
+document.getElementById('gen').textContent = "datos: " + (D.generado||"");
+const SYMS = Object.keys(D.symbols);
+let curSym = SYMS[0];
+let selTrade = null;
+
+const chartEl = document.getElementById('chart');
+const chart = LightweightCharts.createChart(chartEl, {
+  layout:{ background:{color:'#000000'}, textColor:'#c9d4e5' },
+  grid:{ vertLines:{color:'#141414'}, horzLines:{color:'#141414'} },
+  rightPriceScale:{ borderColor:'#2a2a2a' },
+  timeScale:{ borderColor:'#2a2a2a', timeVisible:true, secondsVisible:false },
+  crosshair:{ mode: LightweightCharts.CrosshairMode.Normal },
+});
+const candle = chart.addCandlestickSeries({
+  upColor:'#26c6a6', downColor:'#ef5350', borderUpColor:'#26c6a6', borderDownColor:'#ef5350',
+  wickUpColor:'#26c6a6', wickDownColor:'#ef5350'
+});
+const chanUp = chart.addLineSeries({ color:'#c83cff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+const chanLo = chart.addLineSeries({ color:'#9660ff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+const slLine = chart.addLineSeries({ color:'#2979ff', lineWidth:2, lineType:LightweightCharts.LineType.WithSteps, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+const entryLine = chart.addLineSeries({ color:'#c8d2e1', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+
+// paleta para numerar cada escalon del SL (SL0 rojo -> verde), igual criterio que MT5
+function stepColor(k, n){
+  const red=[242,85,90], amber=[255,209,102], green=[38,224,164];
+  const f = n>1 ? k/(n-1) : 1;
+  const mix=(a,b,t)=>a.map((v,i)=>Math.round(v+(b[i]-v)*t));
+  const c = f<0.5 ? mix(red,amber,f/0.5) : mix(amber,green,(f-0.5)/0.5);
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+let priceLines = [];   // etiquetas de SL/entrada/salida activas, para poder limpiarlas
+function clearPriceLines(){ priceLines.forEach(pl=>candle.removePriceLine(pl)); priceLines=[]; }
+
+new ResizeObserver(()=>chart.applyOptions({width:chartEl.clientWidth,height:chartEl.clientHeight})).observe(chartEl);
+chart.applyOptions({width:chartEl.clientWidth,height:chartEl.clientHeight});
+
+function donchian(candles, N){
+  const up=[], lo=[];
+  for(let i=0;i<candles.length;i++){
+    if(i<N) continue;
+    let hh=-1e18, ll=1e18;
+    for(let j=i-N;j<i;j++){ if(candles[j].h>hh)hh=candles[j].h; if(candles[j].l<ll)ll=candles[j].l; }
+    up.push({time:candles[i].t, value:hh});
+    lo.push({time:candles[i].t, value:ll});
+  }
+  return {up,lo};
+}
+
+function fmt(n,d){ return (n==null)?'–':Number(n).toLocaleString('es',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+
+function render(sym){
+  curSym = sym; selTrade = null;
+  const S = D.symbols[sym];
+  const cs = S.candles.map(k=>({time:k.t, open:k.o, high:k.h, low:k.l, close:k.c}));
+  candle.setData(cs);
+  const dc = donchian(S.candles, 20);
+  chanUp.setData(dc.up); chanLo.setData(dc.lo);
+  slLine.setData([]); entryLine.setData([]);
+  clearPriceLines();
+
+  // marcadores de entrada/salida de todas las operaciones
+  const mk=[];
+  S.trades.forEach((t,i)=>{
+    mk.push({time:t.entry_t, position:(t.dir==='compra'?'belowBar':'aboveBar'),
+             color:(t.dir==='compra'?'#26c6a6':'#ef5350'),
+             shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1)});
+    if(t.exit_t) mk.push({time:t.exit_t, position:'aboveBar', color:'#ffd54f', shape:'circle', text:''});
+  });
+  mk.sort((a,b)=>a.time-b.time);
+  candle.setMarkers(mk);
+
+  buildTable(S.trades);
+  chart.timeScale().fitContent();
+  legend(sym, S);
+}
+
+function legend(sym, S){
+  document.getElementById('legend').innerHTML =
+    `<b>${sym}</b> · H4 · ${S.candles.length} velas<br>`+
+    `<span class="sw" style="background:#c83cff"></span>Canal Donchian máx (20)<br>`+
+    `<span class="sw" style="background:#9660ff"></span>Canal Donchian mín (20)<br>`+
+    `<span class="sw" style="background:#2979ff"></span>Escalera SL (trade seleccionado)<br>`+
+    `<span class="sw" style="background:#c8d2e1;border-radius:0"></span>Entrada (punteada)`;
+}
+
+function buildTable(trades){
+  const tb = document.getElementById('tbody'); tb.innerHTML='';
+  trades.forEach((t,i)=>{
+    const risk = Math.abs(t.entry_p - t.sl0);
+    const r = risk>0 ? ((t.dir==='compra'? (( (t.exit_p??cur(t))-t.entry_p)) : (t.entry_p-(t.exit_p??cur(t)))))/risk : 0;
+    const tr = document.createElement('tr');
+    tr.className='trow'; tr.dataset.i=i;
+    const pnlc = t.pnl>=0?'pos':'neg';
+    const est = t.estado==='abierta' ? ' *' : '';
+    tr.innerHTML =
+      `<td class="l">${i+1}${est}</td>`+
+      `<td class="l"><span class="pill ${t.dir==='compra'?'buy':'sell'}">${t.dir==='compra'?'BUY':'SELL'}</span></td>`+
+      `<td>${fmt(t.entry_p, dg())}</td>`+
+      `<td>${t.exit_p?fmt(t.exit_p,dg()):'abierta'}</td>`+
+      `<td class="${pnlc}">${fmt(t.pnl,2)}</td>`+
+      `<td class="${r>=0?'pos':'neg'}">${fmt(r,2)}</td>`;
+    tr.onclick=()=>selectTrade(i);
+    tb.appendChild(tr);
+  });
+}
+function cur(t){ // precio actual aprox para trade abierto = ultima vela
+  const cs=D.symbols[curSym].candles; return cs[cs.length-1].c;
+}
+function dg(){ return curSym==='USDJPY'?3:2; }
+
+function selectTrade(i){
+  selTrade=i;
+  document.querySelectorAll('tr.trow').forEach(r=>r.classList.toggle('sel', +r.dataset.i===i));
+  const t = D.symbols[curSym].trades[i];
+  const end = t.exit_t || D.symbols[curSym].candles[D.symbols[curSym].candles.length-1].t;
+
+  // escalera SL (linea escalonada que conecta los puntos)
+  slLine.setData(t.sl_steps.map(s=>({time:s.t, value:s.p})));
+
+  // linea de entrada PUNTEADA, del inicio al fin del trade (igual que MT5)
+  entryLine.setData([{time:t.entry_t, value:t.entry_p},{time:end, value:t.entry_p}]);
+
+  // --- etiquetas numeradas con precio: SL0, SL1, SL2... + Entrada + Salida ---
+  clearPriceLines();
+  const n = t.sl_steps.length;
+  t.sl_steps.forEach((s,k)=>{
+    priceLines.push(candle.createPriceLine({
+      price: s.p, color: stepColor(k, n), lineWidth: (k===0?1:2),
+      lineStyle: (k===0? LightweightCharts.LineStyle.Dotted : LightweightCharts.LineStyle.Solid),
+      axisLabelVisible: true, title: `SL${k}  ${fmt(s.p, dg())}`
+    }));
+  });
+  priceLines.push(candle.createPriceLine({
+    price: t.entry_p, color:'#c8d2e1', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dashed,
+    axisLabelVisible:true, title:`Entrada  ${fmt(t.entry_p, dg())}`
+  }));
+  if(t.exit_p){
+    priceLines.push(candle.createPriceLine({
+      price: t.exit_p, color:'#ffd54f', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible:true, title:`Salida  ${fmt(t.exit_p, dg())}`
+    }));
+  }
+
+  // enfocar rango temporal alrededor del trade
+  const pad = 20*4*3600;
+  chart.timeScale().setVisibleRange({from:t.entry_t - pad, to: end + pad});
+  detail(t, i);
+}
+
+function detail(t, i){
+  const risk = Math.abs(t.entry_p - t.sl0);
+  const px = t.exit_p ?? cur(t);
+  const r = risk>0 ? ((t.dir==='compra'?(px-t.entry_p):(t.entry_p-px))/risk) : 0;
+  const pnlc=t.pnl>=0?'pos':'neg';
+  document.getElementById('detail').innerHTML =
+    `<h2>Operación #${i+1}</h2>`+
+    `<table>`+
+    `<tr><td class="l">Símbolo</td><td>${curSym}</td></tr>`+
+    `<tr><td class="l">Dirección</td><td>${t.dir==='compra'?'COMPRA':'VENTA'}</td></tr>`+
+    `<tr><td class="l">Lotes</td><td>${fmt(t.lots,2)}</td></tr>`+
+    `<tr><td class="l">Entrada</td><td>${fmt(t.entry_p,dg())}</td></tr>`+
+    `<tr><td class="l">SL inicial (SL0)</td><td>${fmt(t.sl0,dg())}</td></tr>`+
+    `<tr><td class="l">Salida</td><td>${t.exit_p?fmt(t.exit_p,dg()):'abierta'}</td></tr>`+
+    `<tr><td class="l">Pasos de SL</td><td>${t.sl_steps.length} (SL0..SL${t.sl_steps.length-1})</td></tr>`+
+    `<tr><td class="l">P&amp;L</td><td class="${pnlc}">${fmt(t.pnl,2)} USD</td></tr>`+
+    `<tr><td class="l">R‑múltiplo</td><td class="${r>=0?'pos':'neg'}">${fmt(r,2)} R</td></tr>`+
+    `<tr><td class="l">Estado</td><td>${t.estado}</td></tr>`+
+    `</table>`;
+}
+
+// tabs de simbolos
+const tabs=document.getElementById('tabs');
+SYMS.forEach((s,idx)=>{
+  const b=document.createElement('div'); b.className='tab'+(idx===0?' active':''); b.textContent=s;
+  b.onclick=()=>{ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); render(s); };
+  tabs.appendChild(b);
+});
+
+if(SYMS.length) render(curSym);
+else document.getElementById('legend').textContent = "No hay datos (data.js vacío).";
+</script>
+</body>
+</html>

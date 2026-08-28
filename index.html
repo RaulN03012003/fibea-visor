@@ -208,7 +208,11 @@ function selectTrade(i){
   selTrade=i;
   document.querySelectorAll('tr.trow').forEach(r=>r.classList.toggle('sel', +r.dataset.i===i));
   const t = D.symbols[curSym].trades[i];
-  const end = t.exit_t || D.symbols[curSym].candles[D.symbols[curSym].candles.length-1].t;
+  const lastCandleT = D.symbols[curSym].candles[D.symbols[curSym].candles.length-1].t;
+  // si la operacion sigue abierta y se abrio DESPUES de la ultima vela descargada
+  // (dato generado antes de que cierre la siguiente vela H4), "end" no puede quedar
+  // antes que "entry_t" -- si no, la serie queda en orden descendente y rompe el grafico.
+  const end = t.exit_t || Math.max(lastCandleT, t.entry_t);
   const endPrice = t.exit_p ?? cur(t);
 
   // escalera SL (linea escalonada que conecta los puntos, confinada al rango del trade)
@@ -222,7 +226,7 @@ function selectTrade(i){
   const midT = (end - t.entry_t > 1) ? end - 1 : null;
   const trPts = [{time:t.entry_t, value:t.entry_p}];
   if(midT !== null && midT > t.entry_t) trPts.push({time:midT, value:t.entry_p});
-  trPts.push({time:end, value:endPrice});
+  if(end > t.entry_t) trPts.push({time:end, value:endPrice}); // evita duplicar el primer punto si end==entry_t
   tradeLine.setData(trPts);
 
   // --- solo 2-3 lineas de precio en el grafico (SL0, SL actual, Entrada) para no saturar ---

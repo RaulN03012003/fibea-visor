@@ -79,7 +79,8 @@ const candle = chart.addCandlestickSeries({
 const chanUp = chart.addLineSeries({ color:'#c83cff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 const chanLo = chart.addLineSeries({ color:'#9660ff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 const slLine = chart.addLineSeries({ color:'#2979ff', lineWidth:2, lineType:LightweightCharts.LineType.WithSteps, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
-const entryLine = chart.addLineSeries({ color:'#c8d2e1', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+// linea diagonal punteada que une el punto de ENTRADA con el punto de SALIDA (igual que MT5)
+const tradeLine = chart.addLineSeries({ color:'#c8d2e1', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 
 // paleta para numerar cada escalon del SL (SL0 rojo -> verde), igual criterio que MT5
 function stepColor(k, n){
@@ -108,6 +109,7 @@ function donchian(candles, N){
 }
 
 function fmt(n,d){ return (n==null)?'–':Number(n).toLocaleString('es',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function fmtT(ts){ if(ts==null) return '–'; const d=new Date(ts*1000); return d.toISOString().slice(0,16).replace('T',' ')+' UTC'; }
 
 function render(sym){
   curSym = sym; selTrade = null;
@@ -116,16 +118,16 @@ function render(sym){
   candle.setData(cs);
   const dc = donchian(S.candles, 20);
   chanUp.setData(dc.up); chanLo.setData(dc.lo);
-  slLine.setData([]); entryLine.setData([]);
+  slLine.setData([]); tradeLine.setData([]);
   clearPriceLines();
 
-  // marcadores de entrada/salida de todas las operaciones
+  // marcadores de entrada (flecha, numerada) y salida (circulo amarillo = cierre) de cada operacion
   const mk=[];
   S.trades.forEach((t,i)=>{
     mk.push({time:t.entry_t, position:(t.dir==='compra'?'belowBar':'aboveBar'),
              color:(t.dir==='compra'?'#26c6a6':'#ef5350'),
-             shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1)});
-    if(t.exit_t) mk.push({time:t.exit_t, position:'aboveBar', color:'#ffd54f', shape:'circle', text:''});
+             shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1)+' entra'});
+    if(t.exit_t) mk.push({time:t.exit_t, position:'aboveBar', color:'#ffd54f', shape:'circle', text:'#'+(i+1)+' cierra'});
   });
   mk.sort((a,b)=>a.time-b.time);
   candle.setMarkers(mk);
@@ -141,7 +143,9 @@ function legend(sym, S){
     `<span class="sw" style="background:#c83cff"></span>Canal Donchian máx (20)<br>`+
     `<span class="sw" style="background:#9660ff"></span>Canal Donchian mín (20)<br>`+
     `<span class="sw" style="background:#2979ff"></span>Escalera SL (trade seleccionado)<br>`+
-    `<span class="sw" style="background:#c8d2e1;border-radius:0"></span>Entrada (punteada)`;
+    `<span class="sw" style="background:#c8d2e1;border-radius:0"></span>Entrada↔Salida (punteada)<br>`+
+    `<span class="sw" style="background:#26c6a6;border-radius:50%;width:8px;height:8px"></span>Flecha = apertura &nbsp;`+
+    `<span class="sw" style="background:#ffd54f;border-radius:50%;width:8px;height:8px"></span>Punto amarillo = cierre`;
 }
 
 function buildTable(trades){
@@ -174,23 +178,29 @@ function selectTrade(i){
   document.querySelectorAll('tr.trow').forEach(r=>r.classList.toggle('sel', +r.dataset.i===i));
   const t = D.symbols[curSym].trades[i];
   const end = t.exit_t || D.symbols[curSym].candles[D.symbols[curSym].candles.length-1].t;
+  const endPrice = t.exit_p ?? cur(t);
 
-  // escalera SL (linea escalonada que conecta los puntos)
+  // escalera SL (linea escalonada que conecta los puntos, confinada al rango del trade)
   slLine.setData(t.sl_steps.map(s=>({time:s.t, value:s.p})));
 
-  // linea de entrada PUNTEADA, del inicio al fin del trade (igual que MT5)
-  entryLine.setData([{time:t.entry_t, value:t.entry_p},{time:end, value:t.entry_p}]);
+  // linea DIAGONAL punteada que une el punto de entrada con el de salida (como en MT5)
+  tradeLine.setData([{time:t.entry_t, value:t.entry_p},{time:end, value:endPrice}]);
 
-  // --- etiquetas numeradas con precio: SL0, SL1, SL2... + Entrada + Salida ---
+  // --- solo 2-3 lineas de precio en el grafico (SL0, SL actual, Entrada) para no saturar ---
   clearPriceLines();
   const n = t.sl_steps.length;
-  t.sl_steps.forEach((s,k)=>{
+  const first = t.sl_steps[0];
+  const last  = t.sl_steps[n-1];
+  priceLines.push(candle.createPriceLine({
+    price: first.p, color: stepColor(0, n), lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted,
+    axisLabelVisible: true, title: `SL0  ${fmt(first.p, dg())}`
+  }));
+  if(n > 1){
     priceLines.push(candle.createPriceLine({
-      price: s.p, color: stepColor(k, n), lineWidth: (k===0?1:2),
-      lineStyle: (k===0? LightweightCharts.LineStyle.Dotted : LightweightCharts.LineStyle.Solid),
-      axisLabelVisible: true, title: `SL${k}  ${fmt(s.p, dg())}`
+      price: last.p, color: stepColor(n-1, n), lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid,
+      axisLabelVisible: true, title: `SL${n-1} (último)  ${fmt(last.p, dg())}`
     }));
-  });
+  }
   priceLines.push(candle.createPriceLine({
     price: t.entry_p, color:'#c8d2e1', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dashed,
     axisLabelVisible:true, title:`Entrada  ${fmt(t.entry_p, dg())}`
@@ -213,20 +223,27 @@ function detail(t, i){
   const px = t.exit_p ?? cur(t);
   const r = risk>0 ? ((t.dir==='compra'?(px-t.entry_p):(t.entry_p-px))/risk) : 0;
   const pnlc=t.pnl>=0?'pos':'neg';
+  const n = t.sl_steps.length;
+  const pasos = t.sl_steps.map((s,k)=>
+    `<tr><td class="l" style="color:${stepColor(k,n)}">SL${k}${k===0?' (inicial)':''}</td>`+
+    `<td>${fmt(s.p,dg())}</td><td style="text-align:right;font-size:11px;color:var(--muted)">${fmtT(s.t)}</td></tr>`
+  ).join('');
   document.getElementById('detail').innerHTML =
     `<h2>Operación #${i+1}</h2>`+
     `<table>`+
     `<tr><td class="l">Símbolo</td><td>${curSym}</td></tr>`+
     `<tr><td class="l">Dirección</td><td>${t.dir==='compra'?'COMPRA':'VENTA'}</td></tr>`+
     `<tr><td class="l">Lotes</td><td>${fmt(t.lots,2)}</td></tr>`+
+    `<tr><td class="l">Inicio</td><td style="font-size:11px">${fmtT(t.entry_t)}</td></tr>`+
+    `<tr><td class="l">Fin</td><td style="font-size:11px">${t.exit_t?fmtT(t.exit_t):'abierta'}</td></tr>`+
     `<tr><td class="l">Entrada</td><td>${fmt(t.entry_p,dg())}</td></tr>`+
-    `<tr><td class="l">SL inicial (SL0)</td><td>${fmt(t.sl0,dg())}</td></tr>`+
     `<tr><td class="l">Salida</td><td>${t.exit_p?fmt(t.exit_p,dg()):'abierta'}</td></tr>`+
-    `<tr><td class="l">Pasos de SL</td><td>${t.sl_steps.length} (SL0..SL${t.sl_steps.length-1})</td></tr>`+
     `<tr><td class="l">P&amp;L</td><td class="${pnlc}">${fmt(t.pnl,2)} USD</td></tr>`+
     `<tr><td class="l">R‑múltiplo</td><td class="${r>=0?'pos':'neg'}">${fmt(r,2)} R</td></tr>`+
     `<tr><td class="l">Estado</td><td>${t.estado}</td></tr>`+
-    `</table>`;
+    `</table>`+
+    `<h2>Pasos del SL (${n})</h2>`+
+    `<table>${pasos}</table>`;
 }
 
 // tabs de simbolos

@@ -175,7 +175,8 @@ function legend(sym, S){
     `<span class="sw" style="background:#c83cff"></span>Canal Donchian máx (20)<br>`+
     `<span class="sw" style="background:#9660ff"></span>Canal Donchian mín (20)<br>`+
     `<span class="sw" style="background:#2979ff"></span>Escalera SL (trade seleccionado)<br>`+
-    `<span class="sw" style="background:#ffffff;border-radius:0"></span>Entrada↔Salida (línea blanca punteada)<br>`+
+    `<span class="sw" style="background:rgb(57,255,20)"></span>Entrada↔Salida ganadora &nbsp;`+
+    `<span class="sw" style="background:rgb(255,255,0)"></span>perdedora<br>`+
     `<span class="sw" style="background:#26c6a6;border-radius:50%;width:8px;height:8px"></span>Flecha = apertura &nbsp;`+
     `<span class="sw" style="background:#ffffff;width:8px;height:8px"></span>Cuadrado blanco = cierre`;
 }
@@ -230,6 +231,15 @@ function selectTrade(i){
   const trPts = [{time:t.entry_t, value:t.entry_p}];
   if(midT !== null && midT > t.entry_t) trPts.push({time:midT, value:t.entry_p});
   if(end > t.entry_t) trPts.push({time:end, value:endPrice}); // evita duplicar el primer punto si end==entry_t
+
+  // color segun resultado: ganadora = verde fosforescente, perdedora = amarillo fuerte,
+  // linea continua y gruesa (3px) en vez de punteada
+  const isWin = t.pnl >= 0;
+  tradeLine.applyOptions({
+    color: isWin ? 'rgba(57,255,20,1)' : 'rgba(255,255,0,1)',
+    lineWidth: 3,
+    lineStyle: LightweightCharts.LineStyle.Solid
+  });
   tradeLine.setData(trPts);
 
   // --- solo 2-3 lineas de precio en el grafico (SL0, SL actual, Entrada) para no saturar ---

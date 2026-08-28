@@ -249,9 +249,18 @@ function selectTrade(i){
     }));
   }
 
-  // enfocar rango temporal alrededor del trade
-  const pad = 20*4*3600;
-  chart.timeScale().setVisibleRange({from:t.entry_t - pad, to: end + pad});
+  // enfocar rango alrededor del trade, por INDICE de vela (no por tiempo+pad):
+  // con huecos de fin de semana, un rango por tiempo puede caer fuera de datos reales
+  // y dejar el grafico en blanco. Por indice siempre cae dentro del array de velas.
+  const candles = D.symbols[curSym].candles;
+  const idxAtOrAfter = (ts) => { let lo=0, hi=candles.length-1, ans=candles.length-1;
+    while(lo<=hi){ const mid=(lo+hi)>>1; if(candles[mid].t>=ts){ans=mid; hi=mid-1;} else lo=mid+1; } return ans; };
+  const iEntry = idxAtOrAfter(t.entry_t);
+  const iEnd   = t.exit_t ? idxAtOrAfter(t.exit_t) : candles.length-1;
+  const padBars = 15;
+  chart.timeScale().setVisibleLogicalRange({
+    from: Math.max(0, iEntry-padBars), to: Math.min(candles.length-1, iEnd+padBars)
+  });
   detail(t, i);
 }
 
@@ -284,7 +293,7 @@ function detail(t, i){
 }
 
 // ---------------- Resumen / Cartera (estilo Getquin) ----------------
-const PALETTE = ['#ffd54f','#42a5f5','#ff9800','#26c6a6','#ab47bc','#ef5350'];
+const PALETTE = ['#ffd54f','#42a5f5','#7c4dff','#26c6a6','#ff7043','#ef5350'];
 function symColor(i){ return PALETTE[i % PALETTE.length]; }
 
 function allTradesCombined(){
@@ -402,6 +411,7 @@ function renderSummaryHTML(S){
   `;
 
   const eqEl = document.getElementById('eqChart');
+  if(window._eqChart){ try{ window._eqChart.remove(); }catch(e){} }
   const eqChart = LightweightCharts.createChart(eqEl, {
     layout:{ background:{color:'#000000'}, textColor:'#c9d4e5' },
     grid:{ vertLines:{color:'#141414'}, horzLines:{color:'#141414'} },
@@ -411,6 +421,7 @@ function renderSummaryHTML(S){
   const area = eqChart.addAreaSeries({ lineColor:'#26c6a6', topColor:'rgba(38,198,166,.35)', bottomColor:'rgba(38,198,166,0)', lineWidth:2 });
   area.setData(S.eq);
   eqChart.timeScale().fitContent();
+  window._eqChart = eqChart;
   new ResizeObserver(()=>eqChart.applyOptions({width:eqEl.clientWidth,height:eqEl.clientHeight})).observe(eqEl);
   eqChart.applyOptions({width:eqEl.clientWidth,height:eqEl.clientHeight});
 }
@@ -431,6 +442,9 @@ function showSummaryView(){
 function showSymbolView(){
   document.querySelector('.wrap').style.display='flex';
   document.getElementById('summaryView').style.display='none';
+  // al volver de "Resumen" el canvas estuvo con display:none (0x0); forzar el
+  // tamano real ahora que el layout ya se recalculo, si no el grafico queda en blanco
+  chart.applyOptions({width:chartEl.clientWidth, height:chartEl.clientHeight});
 }
 
 // tabs: Resumen + simbolos

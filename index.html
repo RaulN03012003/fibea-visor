@@ -108,8 +108,9 @@ const candle = chart.addCandlestickSeries({
 const chanUp = chart.addLineSeries({ color:'#c83cff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 const chanLo = chart.addLineSeries({ color:'#9660ff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 const slLine = chart.addLineSeries({ color:'#2979ff', lineWidth:2, lineType:LightweightCharts.LineType.WithSteps, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
-// linea diagonal punteada que une el punto de ENTRADA con el punto de SALIDA (igual que MT5)
-const tradeLine = chart.addLineSeries({ color:'#c8d2e1', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+// linea punteada que une el punto de ENTRADA con el punto de SALIDA (igual que MT5) --
+// blanca y gruesa para que se distinga bien sobre las velas y el resto de las lineas
+const tradeLine = chart.addLineSeries({ color:'#ffffff', lineWidth:2, lineStyle:LightweightCharts.LineStyle.Dashed, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 
 // paleta para numerar cada escalon del SL (SL0 rojo -> verde), igual criterio que MT5
 function stepColor(k, n){
@@ -150,13 +151,15 @@ function render(sym){
   slLine.setData([]); tradeLine.setData([]);
   clearPriceLines();
 
-  // marcadores de entrada (flecha, numerada) y salida (circulo amarillo = cierre) de cada operacion
+  // marcadores de ENTRADA (flecha verde/roja, numerada) y de SALIDA (cuadrado blanco,
+  // forma y color bien distintos de la flecha de entrada para que se note donde termina)
   const mk=[];
   S.trades.forEach((t,i)=>{
     mk.push({time:t.entry_t, position:(t.dir==='compra'?'belowBar':'aboveBar'),
              color:(t.dir==='compra'?'#26c6a6':'#ef5350'),
-             shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1), size:0.8});
-    if(t.exit_t) mk.push({time:t.exit_t, position:'inBar', color:'#ffd54f', shape:'circle', text:'', size:0.55});
+             shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1)+' abre', size:0.8});
+    if(t.exit_t) mk.push({time:t.exit_t, position:(t.dir==='compra'?'aboveBar':'belowBar'),
+             color:'#ffffff', shape:'square', text:'#'+(i+1)+' cierra', size:0.75});
   });
   mk.sort((a,b)=>a.time-b.time);
   candle.setMarkers(mk);
@@ -172,9 +175,9 @@ function legend(sym, S){
     `<span class="sw" style="background:#c83cff"></span>Canal Donchian máx (20)<br>`+
     `<span class="sw" style="background:#9660ff"></span>Canal Donchian mín (20)<br>`+
     `<span class="sw" style="background:#2979ff"></span>Escalera SL (trade seleccionado)<br>`+
-    `<span class="sw" style="background:#c8d2e1;border-radius:0"></span>Entrada↔Salida (punteada)<br>`+
+    `<span class="sw" style="background:#ffffff;border-radius:0"></span>Entrada↔Salida (línea blanca punteada)<br>`+
     `<span class="sw" style="background:#26c6a6;border-radius:50%;width:8px;height:8px"></span>Flecha = apertura &nbsp;`+
-    `<span class="sw" style="background:#ffd54f;border-radius:50%;width:8px;height:8px"></span>Punto amarillo = cierre`;
+    `<span class="sw" style="background:#ffffff;width:8px;height:8px"></span>Cuadrado blanco = cierre`;
 }
 
 function buildTable(trades){
@@ -255,12 +258,25 @@ function selectTrade(i){
     }));
   }
 
-  // NOTA: se probaron 2 formas de auto-enfocar el rango del trade (por tiempo+pad,
-  // y por indice de vela) y ambas a veces dejaban el grafico en blanco por bugs de
-  // redondeo con la libreria. fitContent() es el metodo que siempre funciono bien:
-  // muestra todo el historial y el usuario hace zoom/scroll manual hasta el trade
-  // (rueda del mouse = zoom, arrastrar = desplazar, como dice la ayuda debajo de la tabla).
-  chart.timeScale().fitContent();
+  // Auto-enfocar el rango del trade (por indice de vela, con margen). El bug real que
+  // dejaba el grafico en blanco NO era esto -- eran timestamps duplicados/desordenados
+  // en los datos (ya corregido en generar_datos_visor.py y en tradeLine mas arriba).
+  // Con eso resuelto, este auto-zoom por indice es seguro: siempre cae dentro de 0..n-1
+  // y solo se aplica si el rango resultante es valido (from < to); si no, fitContent().
+  const cands = D.symbols[curSym].candles;
+  const nC = cands.length;
+  const idxAtOrAfter = (ts) => {
+    let lo=0, hi=nC-1, ans=nC-1;
+    while(lo<=hi){ const mid=(lo+hi)>>1; if(cands[mid].t>=ts){ans=mid; hi=mid-1;} else lo=mid+1; }
+    return ans;
+  };
+  const iEntry = idxAtOrAfter(t.entry_t);
+  const iEnd   = t.exit_t ? idxAtOrAfter(t.exit_t) : nC-1;
+  const pad = 15;
+  const from = Math.max(0, Math.min(iEntry, iEnd) - pad);
+  const to   = Math.min(nC-1, Math.max(iEntry, iEnd) + pad);
+  if(to > from) chart.timeScale().setVisibleLogicalRange({from, to});
+  else chart.timeScale().fitContent();
   detail(t, i);
 }
 

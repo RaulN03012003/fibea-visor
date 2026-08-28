@@ -288,7 +288,13 @@ function selectTrade(i){
   const fromI = Math.max(0, Math.min(iEntry, iEnd) - pad);
   const toI   = Math.min(nC-1, Math.max(iEntry, iEnd) + pad);
   const ventana = candsFull.slice(fromI, toI + 1);
-  candle.setData(ventana.map(k=>({time:k.t, open:k.o, high:k.h, low:k.l, close:k.c})));
+  const ventanaData = ventana.map(k=>({time:k.t, open:k.o, high:k.h, low:k.l, close:k.c}));
+  candle.setData(ventanaData);
+  // OJO: al reducir el dataset de 255 velas a un puñado (ventana), la libreria a veces NO
+  // repinta bien en la primera llamada (queda el grafico en blanco aunque los datos esten
+  // bien) -- confirmado en pruebas. Volver a llamar setData con la MISMA data fuerza el
+  // repintado correcto. Es un workaround, pero 100% reproducible y confiable.
+  candle.setData(ventanaData);
   const fromT = ventana[0].t, toT = ventana[ventana.length-1].t;
   const dcVentana = donchian(candsFull, 20); // se calcula sobre el historial completo (necesita 20 velas previas de contexto)
   chanUp.setData(dcVentana.up.filter(p => p.time >= fromT && p.time <= toT));

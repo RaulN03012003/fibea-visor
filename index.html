@@ -179,7 +179,9 @@ function legend(sym, S){
 
 function buildTable(trades){
   const tb = document.getElementById('tbody'); tb.innerHTML='';
-  trades.forEach((t,i)=>{
+  // se muestra la mas reciente arriba, pero el numero "#" es su orden cronologico real
+  const orden = trades.map((t,i)=>[t,i]).slice().reverse();
+  orden.forEach(([t,i])=>{
     const risk = Math.abs(t.entry_p - t.sl0);
     const r = risk>0 ? ((t.dir==='compra'? (( (t.exit_p??cur(t))-t.entry_p)) : (t.entry_p-(t.exit_p??cur(t)))))/risk : 0;
     const tr = document.createElement('tr');

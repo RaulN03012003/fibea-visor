@@ -34,6 +34,34 @@
           border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.5;pointer-events:none}
   .legend b{color:#eaf0fa} .sw{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
   .hint{color:var(--muted);font-size:11px;margin-top:8px}
+
+  /* --- Resumen / Cartera (estilo Getquin) --- */
+  #summaryView{display:none;height:calc(100vh - 52px);overflow:auto;padding:22px 28px}
+  .sumTop{display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap;margin-bottom:18px}
+  .sumBig{font-size:38px;font-weight:700;color:#eaf3ff}
+  .sumBig .cur{font-size:16px;color:var(--muted);font-weight:600;margin-left:6px}
+  .sumDelta{font-size:15px;font-weight:700;padding:3px 10px;border-radius:8px}
+  .sumDelta.pos{color:#26c6a6;background:#0f2b24}
+  .sumDelta.neg{color:#ef5350;background:#331414}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0 24px}
+  .kpi{background:#0c0c0c;border:1px solid var(--grid);border-radius:10px;padding:12px 14px}
+  .kpi .lbl{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+  .kpi .val{font-size:19px;font-weight:700;color:#eaf3ff}
+  .sumGrid{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;margin-bottom:22px}
+  .card{background:#0c0c0c;border:1px solid var(--grid);border-radius:10px;padding:14px 16px}
+  .card h3{margin:0 0 12px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  #eqChart{height:220px}
+  .donutWrap{display:flex;align-items:center;gap:18px}
+  .donut{width:140px;height:140px;border-radius:50%;flex:none}
+  .donutLeg{font-size:12px;line-height:2}
+  .donutLeg .sw{width:9px;height:9px;border-radius:50%}
+  table.sumTbl{width:100%;border-collapse:collapse;font-size:12px}
+  table.sumTbl th{color:var(--muted);text-align:right;font-weight:600;padding:6px 8px;border-bottom:1px solid var(--grid)}
+  table.sumTbl td{text-align:right;padding:6px 8px;border-bottom:1px solid #141414}
+  table.sumTbl th.l, table.sumTbl td.l{text-align:left}
+  table.sumTbl tr.trow2{cursor:pointer}
+  table.sumTbl tr.trow2:hover{background:#111}
+  .symtag{padding:1px 7px;border-radius:6px;font-size:11px;font-weight:700}
 </style>
 </head>
 <body>
@@ -55,6 +83,7 @@
     <div id="detail" style="margin-top:12px"></div>
   </aside>
 </div>
+<div id="summaryView"></div>
 
 <script>document.write('<scr'+'ipt src="data.js?v='+Date.now()+'"><\/scr'+'ipt>');</script>
 <script>
@@ -246,15 +275,169 @@ function detail(t, i){
     `<table>${pasos}</table>`;
 }
 
-// tabs de simbolos
+// ---------------- Resumen / Cartera (estilo Getquin) ----------------
+const PALETTE = ['#ffd54f','#42a5f5','#ff9800','#26c6a6','#ab47bc','#ef5350'];
+function symColor(i){ return PALETTE[i % PALETTE.length]; }
+
+function allTradesCombined(){
+  const rows=[];
+  SYMS.forEach(s=>{
+    (D.symbols[s].trades||[]).forEach((t,idx)=>rows.push({...t, sym:s, idx}));
+  });
+  rows.sort((a,b)=>a.entry_t-b.entry_t);
+  return rows;
+}
+
+function buildSummary(){
+  const cta = D.cuenta || null;
+  const trades = allTradesCombined();
+  const cerradas = trades.filter(t=>t.estado==='cerrada');
+  const abiertas = trades.filter(t=>t.estado!=='cerrada');
+
+  const capIni = cta ? cta.balance_inicial_est : 0;
+  const capAct = cta ? cta.balance_actual : cerradas.reduce((a,t)=>a+t.pnl,0);
+  const moneda = cta ? cta.moneda : 'USD';
+  const pnlTotal = capAct - capIni;
+  const pnlPct = capIni ? (pnlTotal/capIni*100) : 0;
+
+  const wins = cerradas.filter(t=>t.pnl>0), losses = cerradas.filter(t=>t.pnl<=0);
+  const winrate = cerradas.length ? (wins.length/cerradas.length*100) : 0;
+  const sumPos = wins.reduce((a,t)=>a+t.pnl,0), sumNeg = losses.reduce((a,t)=>a+t.pnl,0);
+  const pf = sumNeg!==0 ? (sumPos/Math.abs(sumNeg)) : (sumPos>0?Infinity:0);
+
+  // curva de equity combinada (solo trades cerradas, ordenadas por cierre)
+  const cronoCierre = cerradas.slice().sort((a,b)=>a.exit_t-b.exit_t);
+  let run = capIni;
+  const eq = [{time: (cronoCierre[0]?.entry_t)||0, value: capIni}];
+  let peak=capIni, maxDD=0;
+  cronoCierre.forEach(t=>{ run+=t.pnl; eq.push({time:t.exit_t, value:run}); peak=Math.max(peak,run); maxDD=Math.max(maxDD,peak-run); });
+
+  // distribucion P&L por simbolo
+  const bySym = SYMS.map((s,i)=>({
+    sym:s, color: symColor(i),
+    pnl: (D.symbols[s].trades||[]).filter(t=>t.estado==='cerrada').reduce((a,t)=>a+t.pnl,0),
+    n: (D.symbols[s].trades||[]).length
+  }));
+
+  renderSummaryHTML({capIni,capAct,moneda,pnlTotal,pnlPct,winrate,pf,maxDD,
+                      nCerradas:cerradas.length, nAbiertas:abiertas.length, eq, bySym, trades});
+}
+
+function donutGradient(bySym){
+  const totalAbs = bySym.reduce((a,b)=>a+Math.abs(b.pnl),0) || 1;
+  let acc=0, stops=[];
+  bySym.forEach(b=>{
+    const pct = Math.abs(b.pnl)/totalAbs*100;
+    stops.push(`${b.color} ${acc}% ${acc+pct}%`);
+    acc+=pct;
+  });
+  if(!stops.length) stops.push('#222 0% 100%');
+  return `conic-gradient(${stops.join(',')})`;
+}
+
+function renderSummaryHTML(S){
+  const el = document.getElementById('summaryView');
+  const pnlClass = S.pnlTotal>=0?'pos':'neg';
+  const deltaClass = S.pnlTotal>=0?'sumDelta pos':'sumDelta neg';
+
+  el.innerHTML = `
+    <div class="sumTop">
+      <div><div class="lbl" style="color:var(--muted);font-size:12px;margin-bottom:4px">CAPITAL ACTUAL</div>
+        <span class="sumBig">${fmt(S.capAct,2)}<span class="cur">${S.moneda}</span></span></div>
+      <div class="${deltaClass}">${S.pnlTotal>=0?'▲':'▼'} ${fmt(Math.abs(S.pnlTotal),2)} ${S.moneda} (${fmt(S.pnlPct,1)}%)</div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Capital inicial</div><div class="val">${fmt(S.capIni,2)} ${S.moneda}</div></div>
+      <div class="kpi"><div class="lbl">Operaciones cerradas</div><div class="val">${S.nCerradas}</div></div>
+      <div class="kpi"><div class="lbl">Abiertas ahora</div><div class="val">${S.nAbiertas}</div></div>
+      <div class="kpi"><div class="lbl">Winrate</div><div class="val">${fmt(S.winrate,1)}%</div></div>
+      <div class="kpi"><div class="lbl">Profit Factor</div><div class="val">${S.pf===Infinity?'∞':fmt(S.pf,2)}</div></div>
+      <div class="kpi"><div class="lbl">Drawdown máx</div><div class="val" style="color:#ef5350">${fmt(S.maxDD,2)} ${S.moneda}</div></div>
+    </div>
+
+    <div class="sumGrid">
+      <div class="card"><h3>Evolución del capital</h3><div id="eqChart"></div></div>
+      <div class="card"><h3>P&amp;L por símbolo</h3>
+        <div class="donutWrap">
+          <div class="donut" style="background:${donutGradient(S.bySym)}"></div>
+          <div class="donutLeg">${S.bySym.map(b=>
+            `<div><span class="sw" style="background:${b.color}"></span>${b.sym}: `+
+            `<span class="${b.pnl>=0?'pos':'neg'}">${fmt(b.pnl,2)} ${S.moneda}</span> (${b.n} ops)</div>`).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Todas las operaciones (${S.trades.length})</h3>
+      <table class="sumTbl"><thead><tr>
+        <th class="l">Fecha entrada</th><th class="l">Símbolo</th><th class="l">Dir</th>
+        <th>Entrada</th><th>Salida</th><th>P&amp;L</th><th>R</th><th class="l">Estado</th>
+      </tr></thead><tbody>
+        ${S.trades.slice().reverse().map(t=>{
+          const dgS = t.sym==='USDJPY'?3:2;
+          const risk = Math.abs(t.entry_p-t.sl0);
+          const px = t.exit_p ?? (D.symbols[t.sym].candles.slice(-1)[0]?.c ?? t.entry_p);
+          const r = risk>0 ? ((t.dir==='compra'?(px-t.entry_p):(t.entry_p-px))/risk) : 0;
+          return `<tr class="trow2" onclick="jumpTo('${t.sym}',${t.idx})">`+
+            `<td class="l" style="font-size:11px;color:var(--muted)">${fmtT(t.entry_t)}</td>`+
+            `<td class="l"><span class="symtag" style="background:#151515">${t.sym}</span></td>`+
+            `<td class="l"><span class="pill ${t.dir==='compra'?'buy':'sell'}">${t.dir==='compra'?'BUY':'SELL'}</span></td>`+
+            `<td>${fmt(t.entry_p,dgS)}</td><td>${t.exit_p?fmt(t.exit_p,dgS):'abierta'}</td>`+
+            `<td class="${t.pnl>=0?'pos':'neg'}">${fmt(t.pnl,2)}</td>`+
+            `<td class="${r>=0?'pos':'neg'}">${fmt(r,2)}</td>`+
+            `<td class="l">${t.estado}</td></tr>`;
+        }).join('')}
+      </tbody></table>
+    </div>
+  `;
+
+  const eqEl = document.getElementById('eqChart');
+  const eqChart = LightweightCharts.createChart(eqEl, {
+    layout:{ background:{color:'#000000'}, textColor:'#c9d4e5' },
+    grid:{ vertLines:{color:'#141414'}, horzLines:{color:'#141414'} },
+    rightPriceScale:{ borderColor:'#2a2a2a' },
+    timeScale:{ borderColor:'#2a2a2a', timeVisible:true, secondsVisible:false },
+  });
+  const area = eqChart.addAreaSeries({ lineColor:'#26c6a6', topColor:'rgba(38,198,166,.35)', bottomColor:'rgba(38,198,166,0)', lineWidth:2 });
+  area.setData(S.eq);
+  eqChart.timeScale().fitContent();
+  new ResizeObserver(()=>eqChart.applyOptions({width:eqEl.clientWidth,height:eqEl.clientHeight})).observe(eqEl);
+  eqChart.applyOptions({width:eqEl.clientWidth,height:eqEl.clientHeight});
+}
+
+function jumpTo(sym, idx){
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(x=>{ if(x.textContent===sym) x.classList.add('active'); });
+  showSymbolView();
+  render(sym);
+  selectTrade(idx);
+}
+
+function showSummaryView(){
+  document.querySelector('.wrap').style.display='none';
+  document.getElementById('summaryView').style.display='block';
+  buildSummary();
+}
+function showSymbolView(){
+  document.querySelector('.wrap').style.display='flex';
+  document.getElementById('summaryView').style.display='none';
+}
+
+// tabs: Resumen + simbolos
 const tabs=document.getElementById('tabs');
+const bSum=document.createElement('div'); bSum.className='tab active'; bSum.textContent='Resumen';
+bSum.onclick=()=>{ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); bSum.classList.add('active'); showSummaryView(); };
+tabs.appendChild(bSum);
+
 SYMS.forEach((s,idx)=>{
-  const b=document.createElement('div'); b.className='tab'+(idx===0?' active':''); b.textContent=s;
-  b.onclick=()=>{ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); render(s); };
+  const b=document.createElement('div'); b.className='tab'; b.textContent=s;
+  b.onclick=()=>{ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); showSymbolView(); render(s); };
   tabs.appendChild(b);
 });
 
-if(SYMS.length) render(curSym);
+if(SYMS.length){ showSummaryView(); }
 else document.getElementById('legend').textContent = "No hay datos (data.js vacío).";
 </script>
 </body>

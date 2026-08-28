@@ -155,8 +155,8 @@ function render(sym){
   S.trades.forEach((t,i)=>{
     mk.push({time:t.entry_t, position:(t.dir==='compra'?'belowBar':'aboveBar'),
              color:(t.dir==='compra'?'#26c6a6':'#ef5350'),
-             shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1)+' entra'});
-    if(t.exit_t) mk.push({time:t.exit_t, position:'aboveBar', color:'#ffd54f', shape:'circle', text:'#'+(i+1)+' cierra'});
+             shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1), size:0.8});
+    if(t.exit_t) mk.push({time:t.exit_t, position:'inBar', color:'#ffd54f', shape:'circle', text:'', size:0.55});
   });
   mk.sort((a,b)=>a.time-b.time);
   candle.setMarkers(mk);
@@ -212,8 +212,14 @@ function selectTrade(i){
   // escalera SL (linea escalonada que conecta los puntos, confinada al rango del trade)
   slLine.setData(t.sl_steps.map(s=>({time:s.t, value:s.p})));
 
-  // linea DIAGONAL punteada que une el punto de entrada con el de salida (como en MT5)
-  tradeLine.setData([{time:t.entry_t, value:t.entry_p},{time:end, value:endPrice}]);
+  // linea punteada "en L" (como en MT5): horizontal al precio de ENTRADA hasta el cierre,
+  // y ahi un salto vertical hasta el precio de SALIDA -- mas clara que una diagonal recta,
+  // porque no insinua un movimiento de precio que no existio.
+  tradeLine.setData([
+    {time:t.entry_t, value:t.entry_p},
+    {time:end,       value:t.entry_p},
+    {time:end,       value:endPrice}
+  ]);
 
   // --- solo 2-3 lineas de precio en el grafico (SL0, SL actual, Entrada) para no saturar ---
   clearPriceLines();

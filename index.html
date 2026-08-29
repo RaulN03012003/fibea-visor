@@ -374,7 +374,18 @@ function selectTrade(i){
 
   // escalera SL (linea escalonada que conecta los puntos, confinada al rango del trade)
   // -- SOLO aparece cuando el usuario selecciona una operacion, nunca en la vista general.
-  slLine.setData(t.sl_steps.map(s=>({time:s.t, value:s.p})));
+  const slPts = t.sl_steps.map(s=>({time:s.t, value:s.p}));
+  // si el SL no se movio en las ultimas velas antes de la salida, el ultimo paso
+  // registrado queda ANTES de la vela de salida y la linea (WithSteps) se corta ahi --
+  // da la impresion de que "el SL no llega a tocar la salida". Se extiende visualmente
+  // con un punto final al mismo precio, en la vela de salida, para que si la toque.
+  const candsForSL = D.symbols[curSym].candles;
+  const endForSL = t.exit_t || Math.max(candsForSL[candsForSL.length-1].t, t.entry_t);
+  const endBarForSL = barTimeFor(candsForSL, endForSL);
+  if(slPts.length && slPts[slPts.length-1].time < endBarForSL){
+    slPts.push({time: endBarForSL, value: slPts[slPts.length-1].value});
+  }
+  slLine.setData(slPts);
 
   // al seleccionar una operacion se muestra SOLO su linea (las demas, que se ven todas
   // juntas en la vista general, se ocultan para no confundir con el trade elegido)

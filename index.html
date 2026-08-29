@@ -167,6 +167,14 @@ let curPriceLineTrade = null; // ultimo trade cuyas lineas de precio se construy
 
 function saveIndState(){ try{ localStorage.setItem('fibea_ind_state', JSON.stringify(indState)); }catch(e){} }
 
+// marcadores de apertura/cierre: en la vista general se ven los de TODAS las
+// operaciones; si hay un trade seleccionado, SOLO los de ese trade (igual criterio
+// que la linea entrada->salida, para que la vista de detalle sea de ESE trade y nada mas).
+function applyMarkers(){
+  if(!indState.markers){ candle.setMarkers([]); return; }
+  candle.setMarkers(selTrade===null ? allMarkers : allMarkers.filter(m=>m.idx===selTrade));
+}
+
 function buildPriceLinesFor(t){
   clearPriceLines();
   if(!indState.priceLines || !t) return;
@@ -204,7 +212,7 @@ function applyIndOne(key){
     if(selTrade===null) tradeLineSeries.forEach(o=>o.series.applyOptions({visible: indState.tradeLine}));
     else tradeLineSeries.forEach(o=>o.series.applyOptions({visible: (o.i===selTrade) && indState.tradeLine}));
   }
-  if(key==='markers')    candle.setMarkers(indState.markers ? allMarkers : []);
+  if(key==='markers')    applyMarkers();
   if(key==='priceLines') buildPriceLinesFor(curPriceLineTrade);
 }
 function applyIndAll(){ Object.keys(IND_DEFAULT).forEach(applyIndOne); }
@@ -274,16 +282,16 @@ function render(sym){
     const entryBarT = barTimeFor(S.candles, t.entry_t);
     mk.push({time:entryBarT, position:(t.dir==='compra'?'belowBar':'aboveBar'),
              color:(t.dir==='compra'?'#26c6a6':'#ef5350'),
-             shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1)+' abre', size:0.8});
+             shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1)+' abre', size:0.8, idx:i});
     if(t.exit_t){
       const exitBarT = barTimeFor(S.candles, t.exit_t);
       mk.push({time:exitBarT, position:(t.dir==='compra'?'aboveBar':'belowBar'),
-               color:'#ffffff', shape:'square', text:'#'+(i+1)+' cierra', size:0.75});
+               color:'#ffffff', shape:'square', text:'#'+(i+1)+' cierra', size:0.75, idx:i});
     }
   });
   mk.sort((a,b)=>a.time-b.time);
   allMarkers = mk;
-  candle.setMarkers(indState.markers ? allMarkers : []);
+  applyMarkers();
 
   // lineas diagonales punteadas de entrada->salida de TODAS las operaciones del simbolo,
   // vistas a la vez (vista general): una serie por trade para que no se conecten entre si.
@@ -323,6 +331,7 @@ function volverVistaGeneral(){
   const S = D.symbols[curSym];
   const cs = S.candles.map(k=>({time:k.t, open:k.o, high:k.h, low:k.l, close:k.c}));
   candle.setData(cs);
+  applyMarkers();
   const dc = donchian(S.candles, 20);
   chanUp.setData(dc.up); chanLo.setData(dc.lo);
   chart.timeScale().fitContent();
@@ -371,6 +380,9 @@ function selectTrade(i){
   selTrade=i;
   document.querySelectorAll('tr.trow').forEach(r=>r.classList.toggle('sel', +r.dataset.i===i));
   const t = D.symbols[curSym].trades[i];
+
+  // marcadores apertura/cierre: SOLO los de esta operacion (no los de todas)
+  applyMarkers();
 
   // escalera SL (linea escalonada que conecta los puntos, confinada al rango del trade)
   // -- SOLO aparece cuando el usuario selecciona una operacion, nunca en la vista general.

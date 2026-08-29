@@ -41,6 +41,9 @@
   .indRow{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;white-space:nowrap}
   .indRow input{accent-color:#2979ff;cursor:pointer;width:13px;height:13px;flex:none}
   .indRow .sw{width:10px;height:10px;border-radius:2px;flex:none;margin:0}
+  .volverBtn{position:absolute;top:8px;right:10px;z-index:6;background:#111;border:1px solid var(--grid);
+             color:#eaf3ff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer}
+  .volverBtn:hover{background:#1c1c1c;border-color:#444}
 
   /* --- Resumen / Cartera (estilo Getquin) --- */
   #summaryView{display:none;height:calc(100vh - 52px);overflow:auto;padding:22px 28px}
@@ -91,13 +94,14 @@
         <label class="indRow"><input type="checkbox" data-ind="priceLines"><span class="sw" style="background:#ffd54f"></span>Líneas de precio (SL/Entr/Salida)</label>
       </div>
     </div>
+    <button id="btnVolver" class="volverBtn" style="display:none">← Vista general</button>
   </div>
   <aside>
     <h2>Operaciones</h2>
     <table id="tbl"><thead><tr>
       <th class="l">#</th><th class="l">Dir</th><th>Entrada</th><th>Salida</th><th>P&amp;L</th><th>R</th>
     </tr></thead><tbody id="tbody"></tbody></table>
-    <div class="hint">Clic en una operación para enfocarla y ver su escalera de SL (SL0→SLk). Rueda del mouse = zoom · arrastrar = desplazar.</div>
+    <div class="hint">La vista general muestra el Donchian y la línea de todas las operaciones. Clic en una fila para enfocarla y ver su escalera de SL (SL0→SLk); usa "← Vista general" para volver. Rueda del mouse = zoom · arrastrar = desplazar.</div>
     <div id="detail" style="margin-top:12px"></div>
   </aside>
 </div>
@@ -126,12 +130,12 @@ const candle = chart.addCandlestickSeries({
 const chanUp = chart.addLineSeries({ color:'#c83cff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 const chanLo = chart.addLineSeries({ color:'#9660ff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 const slLine = chart.addLineSeries({ color:'#2979ff', lineWidth:2, lineType:LightweightCharts.LineType.WithSteps, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
-// linea que une el punto de ENTRADA con el de SALIDA, en forma de "L" (horizontal al
-// precio de entrada, y un salto vertical al precio de salida en el momento del cierre --
-// NO diagonal, para no insinuar un movimiento de precio que no existio). Solo se activa
-// para la operacion que el usuario selecciona (no todas a la vez). Verde fosforescente
-// si gano, amarillo fuerte si perdio.
-const tradeLine = chart.addLineSeries({ color:'rgba(57,255,20,1)', lineWidth:3, lineStyle:LightweightCharts.LineStyle.Solid, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+// lineas diagonales punteadas de entrada->salida: se ve UNA por cada operacion del
+// simbolo, TODAS a la vez en la vista general (verde=gano, amarillo=perdio). Cada
+// trade tiene su propia serie (no una compartida) para que no se conecten entre si.
+// Se reconstruyen en cada render(sym). Al seleccionar un trade se engrosa su linea
+// para resaltarla entre las demas; al volver a la vista general se afinan de nuevo.
+let tradeLineSeries = [];   // [{series, i}]
 
 // paleta para numerar cada escalon del SL (SL0 rojo -> verde), igual criterio que MT5
 function stepColor(k, n){
@@ -192,7 +196,7 @@ function applyIndOne(key){
   if(key==='donchUp')    chanUp.applyOptions({visible: indState.donchUp});
   if(key==='donchLo')    chanLo.applyOptions({visible: indState.donchLo});
   if(key==='sl')         slLine.applyOptions({visible: indState.sl});
-  if(key==='tradeLine')  tradeLine.applyOptions({visible: indState.tradeLine});
+  if(key==='tradeLine')  tradeLineSeries.forEach(o=>o.series.applyOptions({visible: indState.tradeLine}));
   if(key==='markers')    candle.setMarkers(indState.markers ? allMarkers : []);
   if(key==='priceLines') buildPriceLinesFor(curPriceLineTrade);
 }
@@ -250,9 +254,11 @@ function render(sym){
   candle.setData(cs);
   const dc = donchian(S.candles, 20);
   chanUp.setData(dc.up); chanLo.setData(dc.lo);
-  slLine.setData([]); tradeLine.setData([]);
+  slLine.setData([]);           // la escalera de SL solo se ve al seleccionar un trade
   curPriceLineTrade = null;
   clearPriceLines();
+  document.getElementById('btnVolver').style.display = 'none';
+  document.getElementById('detail').innerHTML = '<div class="hint">Selecciona una operación de la tabla para ver su detalle y su escalera de SL.</div>';
 
   // marcadores de ENTRADA (flecha verde/roja, numerada) y de SALIDA (cuadrado blanco,
   // forma y color bien distintos de la flecha de entrada para que se note donde termina)
@@ -272,18 +278,59 @@ function render(sym){
   allMarkers = mk;
   candle.setMarkers(indState.markers ? allMarkers : []);
 
+  // lineas diagonales punteadas de entrada->salida de TODAS las operaciones del simbolo,
+  // vistas a la vez (vista general): una serie por trade para que no se conecten entre si.
+  tradeLineSeries.forEach(o=>{ try{ chart.removeSeries(o.series); }catch(e){} });
+  tradeLineSeries = [];
+  S.trades.forEach((t,i)=>{
+    const entryBarT = barTimeFor(S.candles, t.entry_t);
+    const lastCandleT = S.candles[S.candles.length-1].t;
+    const end = t.exit_t || Math.max(lastCandleT, t.entry_t);
+    const endPrice = t.exit_p ?? S.candles[S.candles.length-1].c;
+    const endBarT = barTimeFor(S.candles, end);
+    const pts = [{time:entryBarT, value:t.entry_p}];
+    if(endBarT > entryBarT) pts.push({time:endBarT, value:endPrice});
+    const isWin = t.pnl >= 0;
+    const s = chart.addLineSeries({
+      color: isWin ? 'rgba(57,255,20,1)' : 'rgba(255,255,0,1)',
+      lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed,
+      priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false,
+      visible: indState.tradeLine
+    });
+    s.setData(pts);
+    tradeLineSeries.push({series:s, i});
+  });
+
   buildTable(S.trades);
   chart.timeScale().fitContent();
   legend(sym, S);
 }
 
+function volverVistaGeneral(){
+  selTrade = null;
+  document.querySelectorAll('tr.trow').forEach(r=>r.classList.remove('sel'));
+  slLine.setData([]);
+  curPriceLineTrade = null;
+  clearPriceLines();
+  tradeLineSeries.forEach(o=>o.series.applyOptions({lineWidth:2}));
+  const S = D.symbols[curSym];
+  const cs = S.candles.map(k=>({time:k.t, open:k.o, high:k.h, low:k.l, close:k.c}));
+  candle.setData(cs);
+  const dc = donchian(S.candles, 20);
+  chanUp.setData(dc.up); chanLo.setData(dc.lo);
+  chart.timeScale().fitContent();
+  document.getElementById('btnVolver').style.display = 'none';
+  document.getElementById('detail').innerHTML = '<div class="hint">Selecciona una operación de la tabla para ver su detalle y su escalera de SL.</div>';
+}
+document.getElementById('btnVolver').addEventListener('click', volverVistaGeneral);
+
 function legend(sym, S){
   document.getElementById('legend').innerHTML =
     `<b>${sym}</b> · H4 · ${S.candles.length} velas<br>`+
-    `<span style="color:var(--muted)">Al hacer clic en una operación de la tabla:</span><br>`+
     `<span class="sw" style="background:rgb(57,255,20);height:2px;border-bottom:2px dashed rgb(57,255,20)"></span>`+
-    `Línea punteada = entrada → salida (verde=ganó, amarillo=perdió)<br>`+
-    `<span style="color:var(--muted)">(panel de abajo: mostrar/ocultar cada indicador)</span>`;
+    `Línea punteada = entrada → salida de cada operación (verde=ganó, amarillo=perdió)<br>`+
+    `<span style="color:var(--muted)">Clic en una operación de la tabla para ver su escalera de SL y hacer zoom · `+
+    `"← Vista general" arriba a la derecha para volver<br>(panel de abajo: mostrar/ocultar cada indicador)</span>`;
 }
 
 function buildTable(trades){
@@ -317,39 +364,20 @@ function selectTrade(i){
   selTrade=i;
   document.querySelectorAll('tr.trow').forEach(r=>r.classList.toggle('sel', +r.dataset.i===i));
   const t = D.symbols[curSym].trades[i];
-  const lastCandleT = D.symbols[curSym].candles[D.symbols[curSym].candles.length-1].t;
-  // si la operacion sigue abierta y se abrio DESPUES de la ultima vela descargada
-  // (dato generado antes de que cierre la siguiente vela H4), "end" no puede quedar
-  // antes que "entry_t" -- si no, la serie queda en orden descendente y rompe el grafico.
-  const end = t.exit_t || Math.max(lastCandleT, t.entry_t);
-  const endPrice = t.exit_p ?? cur(t);
 
   // escalera SL (linea escalonada que conecta los puntos, confinada al rango del trade)
+  // -- SOLO aparece cuando el usuario selecciona una operacion, nunca en la vista general.
   slLine.setData(t.sl_steps.map(s=>({time:s.t, value:s.p})));
 
-  // linea diagonal punteada/segmentada que une directamente el punto de ENTRADA
-  // con el punto de SALIDA de la operacion seleccionada (solo esa, no todas).
-  // Verde si gano, amarillo si perdio.
-  // OJO: el precio de salida (SL tocado) puede ejecutarse en cualquier momento DENTRO
-  // de una vela H4, no justo en su apertura -- si se usa el timestamp exacto del deal
-  // la libreria coloca el punto en un hueco entre barras (se ve "flotando" fuera de la
-  // vela). Se ajusta (snap) al timestamp real de la vela que contiene ese momento.
-  const candsAll = D.symbols[curSym].candles;
-  const entryBarT = barTimeFor(candsAll, t.entry_t);
-  const endBarT = barTimeFor(candsAll, end);
-  const trPts = [{time:entryBarT, value:t.entry_p}];
-  if(endBarT > entryBarT) trPts.push({time:endBarT, value:endPrice});
-  const isWin = t.pnl >= 0;
-  tradeLine.applyOptions({
-    color: isWin ? 'rgba(57,255,20,1)' : 'rgba(255,255,0,1)',
-    lineWidth: 3,
-    lineStyle: LightweightCharts.LineStyle.Dashed
-  });
-  tradeLine.setData(trPts);
+  // resaltar la linea diagonal de ESTA operacion entre todas las que ya se ven en la
+  // vista general (mas gruesa que el resto, para distinguirla de un vistazo)
+  tradeLineSeries.forEach(o=>o.series.applyOptions({ lineWidth: (o.i===i ? 4 : 2) }));
 
   // --- lineas de precio (SL0, SL actual, Entrada, Salida) -- opcionales via panel ---
   curPriceLineTrade = t;
   buildPriceLinesFor(t);
+
+  document.getElementById('btnVolver').style.display = 'block';
 
   // Auto-enfocar el rango del trade. setVisibleLogicalRange/setVisibleRange de la libreria
   // resultaron poco fiables: en pruebas repetidas, a veces ignoraban el "from" pedido y

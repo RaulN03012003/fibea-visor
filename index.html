@@ -30,10 +30,17 @@
   .pos{color:var(--up)} .neg{color:var(--dn)}
   .pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:700}
   .buy{background:#12352b;color:#4fe0b6} .sell{background:#3a1f22;color:#ff8a8f}
-  .legend{position:absolute;top:8px;left:10px;z-index:5;background:rgba(0,0,0,.82);border:1px solid var(--grid);
+  .overlay{position:absolute;top:8px;left:10px;z-index:5;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:230px}
+  .legend{background:rgba(0,0,0,.82);border:1px solid var(--grid);
           border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.5;pointer-events:none}
   .legend b{color:#eaf0fa} .sw{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
   .hint{color:var(--muted);font-size:11px;margin-top:8px}
+  .indPanel{background:rgba(0,0,0,.82);border:1px solid var(--grid);border-radius:8px;padding:8px 10px;
+            font-size:11.5px;line-height:1.7;pointer-events:auto}
+  .indPanel .indHead{color:var(--muted);text-transform:uppercase;font-size:10px;letter-spacing:.5px;margin-bottom:4px}
+  .indRow{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;white-space:nowrap}
+  .indRow input{accent-color:#2979ff;cursor:pointer;width:13px;height:13px;flex:none}
+  .indRow .sw{width:10px;height:10px;border-radius:2px;flex:none;margin:0}
 
   /* --- Resumen / Cartera (estilo Getquin) --- */
   #summaryView{display:none;height:calc(100vh - 52px);overflow:auto;padding:22px 28px}
@@ -72,7 +79,18 @@
 </header>
 <div class="wrap">
   <div id="chart">
-    <div class="legend" id="legend"></div>
+    <div class="overlay">
+      <div class="legend" id="legend"></div>
+      <div class="indPanel" id="indPanel">
+        <div class="indHead">Indicadores</div>
+        <label class="indRow"><input type="checkbox" data-ind="donchUp"><span class="sw" style="background:#c83cff"></span>Canal Donchian máx</label>
+        <label class="indRow"><input type="checkbox" data-ind="donchLo"><span class="sw" style="background:#9660ff"></span>Canal Donchian mín</label>
+        <label class="indRow"><input type="checkbox" data-ind="sl"><span class="sw" style="background:#2979ff"></span>Escalera SL</label>
+        <label class="indRow"><input type="checkbox" data-ind="tradeLine"><span class="sw" style="background:rgb(57,255,20)"></span>Línea entrada→salida</label>
+        <label class="indRow"><input type="checkbox" data-ind="markers"><span class="sw" style="background:#ffffff;border-radius:50%"></span>Marcadores apertura/cierre</label>
+        <label class="indRow"><input type="checkbox" data-ind="priceLines"><span class="sw" style="background:#ffd54f"></span>Líneas de precio (SL/Entr/Salida)</label>
+      </div>
+    </div>
   </div>
   <aside>
     <h2>Operaciones</h2>
@@ -126,6 +144,71 @@ function stepColor(k, n){
 let priceLines = [];   // etiquetas de SL/entrada/salida activas, para poder limpiarlas
 function clearPriceLines(){ priceLines.forEach(pl=>candle.removePriceLine(pl)); priceLines=[]; }
 
+// ---------------- Panel de indicadores (mostrar/ocultar, estilo TradingView) ----------------
+// Estado persistido en localStorage: que indicadores estan activos (por defecto todos ON).
+// Cada checkbox controla su serie de forma independiente via applyOptions({visible}) --
+// esto NO borra los datos, solo los oculta, asi que reactivar es instantaneo sin recalcular nada.
+const IND_DEFAULT = {donchUp:true, donchLo:true, sl:true, tradeLine:true, markers:true, priceLines:true};
+let indState = IND_DEFAULT;
+try{
+  const saved = JSON.parse(localStorage.getItem('fibea_ind_state')||'{}');
+  indState = Object.assign({}, IND_DEFAULT, saved);
+}catch(e){ indState = Object.assign({}, IND_DEFAULT); }
+
+let allMarkers = [];        // set completo de marcadores de apertura/cierre del simbolo actual
+let curPriceLineTrade = null; // ultimo trade cuyas lineas de precio se construyeron, para poder re-togglear
+
+function saveIndState(){ try{ localStorage.setItem('fibea_ind_state', JSON.stringify(indState)); }catch(e){} }
+
+function buildPriceLinesFor(t){
+  clearPriceLines();
+  if(!indState.priceLines || !t) return;
+  const n = t.sl_steps.length;
+  const first = t.sl_steps[0];
+  const last  = t.sl_steps[n-1];
+  priceLines.push(candle.createPriceLine({
+    price: first.p, color: stepColor(0, n), lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted,
+    axisLabelVisible: true, title: `SL0  ${fmt(first.p, dg())}`
+  }));
+  if(n > 1){
+    priceLines.push(candle.createPriceLine({
+      price: last.p, color: stepColor(n-1, n), lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid,
+      axisLabelVisible: true, title: `SL${n-1} (último)  ${fmt(last.p, dg())}`
+    }));
+  }
+  priceLines.push(candle.createPriceLine({
+    price: t.entry_p, color:'#c8d2e1', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dashed,
+    axisLabelVisible:true, title:`Entrada  ${fmt(t.entry_p, dg())}`
+  }));
+  if(t.exit_p){
+    priceLines.push(candle.createPriceLine({
+      price: t.exit_p, color:'#ffd54f', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible:true, title:`Salida  ${fmt(t.exit_p, dg())}`
+    }));
+  }
+}
+
+function applyIndOne(key){
+  if(key==='donchUp')    chanUp.applyOptions({visible: indState.donchUp});
+  if(key==='donchLo')    chanLo.applyOptions({visible: indState.donchLo});
+  if(key==='sl')         slLine.applyOptions({visible: indState.sl});
+  if(key==='tradeLine')  tradeLine.applyOptions({visible: indState.tradeLine});
+  if(key==='markers')    candle.setMarkers(indState.markers ? allMarkers : []);
+  if(key==='priceLines') buildPriceLinesFor(curPriceLineTrade);
+}
+function applyIndAll(){ Object.keys(IND_DEFAULT).forEach(applyIndOne); }
+
+document.querySelectorAll('#indPanel input[type=checkbox]').forEach(cb=>{
+  const key = cb.dataset.ind;
+  cb.checked = !!indState[key];
+  cb.addEventListener('change', ()=>{
+    indState[key] = cb.checked;
+    saveIndState();
+    applyIndOne(key);
+  });
+});
+applyIndAll();
+
 new ResizeObserver(()=>chart.applyOptions({width:chartEl.clientWidth,height:chartEl.clientHeight})).observe(chartEl);
 chart.applyOptions({width:chartEl.clientWidth,height:chartEl.clientHeight});
 
@@ -152,6 +235,7 @@ function render(sym){
   const dc = donchian(S.candles, 20);
   chanUp.setData(dc.up); chanLo.setData(dc.lo);
   slLine.setData([]); tradeLine.setData([]);
+  curPriceLineTrade = null;
   clearPriceLines();
 
   // marcadores de ENTRADA (flecha verde/roja, numerada) y de SALIDA (cuadrado blanco,
@@ -165,7 +249,8 @@ function render(sym){
              color:'#ffffff', shape:'square', text:'#'+(i+1)+' cierra', size:0.75});
   });
   mk.sort((a,b)=>a.time-b.time);
-  candle.setMarkers(mk);
+  allMarkers = mk;
+  candle.setMarkers(indState.markers ? allMarkers : []);
 
   buildTable(S.trades);
   chart.timeScale().fitContent();
@@ -175,13 +260,7 @@ function render(sym){
 function legend(sym, S){
   document.getElementById('legend').innerHTML =
     `<b>${sym}</b> · H4 · ${S.candles.length} velas<br>`+
-    `<span class="sw" style="background:#c83cff"></span>Canal Donchian máx (20)<br>`+
-    `<span class="sw" style="background:#9660ff"></span>Canal Donchian mín (20)<br>`+
-    `<span class="sw" style="background:#2979ff"></span>Escalera SL (trade seleccionado)<br>`+
-    `<span class="sw" style="background:rgb(57,255,20)"></span>Entrada→Salida (trade seleccionado, ganadora) &nbsp;`+
-    `<span class="sw" style="background:rgb(255,255,0)"></span>perdedora<br>`+
-    `<span class="sw" style="background:#26c6a6;border-radius:50%;width:8px;height:8px"></span>Flecha = apertura &nbsp;`+
-    `<span class="sw" style="background:#ffffff;width:8px;height:8px"></span>Cuadrado blanco = cierre`;
+    `<span style="color:var(--muted)">Verde = ganadora · Amarillo = perdedora (usa el panel de abajo para mostrar/ocultar)</span>`;
 }
 
 function buildTable(trades){
@@ -240,31 +319,9 @@ function selectTrade(i){
   });
   tradeLine.setData(trPts);
 
-  // --- solo 2-3 lineas de precio en el grafico (SL0, SL actual, Entrada) para no saturar ---
-  clearPriceLines();
-  const n = t.sl_steps.length;
-  const first = t.sl_steps[0];
-  const last  = t.sl_steps[n-1];
-  priceLines.push(candle.createPriceLine({
-    price: first.p, color: stepColor(0, n), lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted,
-    axisLabelVisible: true, title: `SL0  ${fmt(first.p, dg())}`
-  }));
-  if(n > 1){
-    priceLines.push(candle.createPriceLine({
-      price: last.p, color: stepColor(n-1, n), lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid,
-      axisLabelVisible: true, title: `SL${n-1} (último)  ${fmt(last.p, dg())}`
-    }));
-  }
-  priceLines.push(candle.createPriceLine({
-    price: t.entry_p, color:'#c8d2e1', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dashed,
-    axisLabelVisible:true, title:`Entrada  ${fmt(t.entry_p, dg())}`
-  }));
-  if(t.exit_p){
-    priceLines.push(candle.createPriceLine({
-      price: t.exit_p, color:'#ffd54f', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dashed,
-      axisLabelVisible:true, title:`Salida  ${fmt(t.exit_p, dg())}`
-    }));
-  }
+  // --- lineas de precio (SL0, SL actual, Entrada, Salida) -- opcionales via panel ---
+  curPriceLineTrade = t;
+  buildPriceLinesFor(t);
 
   // Auto-enfocar el rango del trade. setVisibleLogicalRange/setVisibleRange de la libreria
   // resultaron poco fiables: en pruebas repetidas, a veces ignoraban el "from" pedido y

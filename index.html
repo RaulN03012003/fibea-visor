@@ -260,7 +260,10 @@ function render(sym){
 function legend(sym, S){
   document.getElementById('legend').innerHTML =
     `<b>${sym}</b> · H4 · ${S.candles.length} velas<br>`+
-    `<span style="color:var(--muted)">Verde = ganadora · Amarillo = perdedora (usa el panel de abajo para mostrar/ocultar)</span>`;
+    `<span style="color:var(--muted)">Al hacer clic en una operación de la tabla:</span><br>`+
+    `<span class="sw" style="background:rgb(57,255,20);height:2px;border-bottom:2px dashed rgb(57,255,20)"></span>`+
+    `Línea punteada = entrada → salida (verde=ganó, amarillo=perdió)<br>`+
+    `<span style="color:var(--muted)">(panel de abajo: mostrar/ocultar cada indicador)</span>`;
 }
 
 function buildTable(trades){
@@ -304,18 +307,16 @@ function selectTrade(i){
   // escalera SL (linea escalonada que conecta los puntos, confinada al rango del trade)
   slLine.setData(t.sl_steps.map(s=>({time:s.t, value:s.p})));
 
-  // linea de entrada->salida SOLO de la operacion seleccionada, en forma de "L"
-  // (horizontal al precio de entrada hasta la penultima vela, luego vertical al precio
-  // de salida en la ultima vela) -- nunca diagonal, y solo para el trade clickeado.
-  const midT = (end - t.entry_t > 1) ? end - 1 : null;
+  // linea diagonal punteada/segmentada que une directamente el punto de ENTRADA
+  // con el punto de SALIDA de la operacion seleccionada (solo esa, no todas).
+  // Verde si gano, amarillo si perdio.
   const trPts = [{time:t.entry_t, value:t.entry_p}];
-  if(midT !== null && midT > t.entry_t) trPts.push({time:midT, value:t.entry_p});
   if(end > t.entry_t) trPts.push({time:end, value:endPrice});
   const isWin = t.pnl >= 0;
   tradeLine.applyOptions({
     color: isWin ? 'rgba(57,255,20,1)' : 'rgba(255,255,0,1)',
     lineWidth: 3,
-    lineStyle: LightweightCharts.LineStyle.Solid
+    lineStyle: LightweightCharts.LineStyle.Dashed
   });
   tradeLine.setData(trPts);
 

@@ -473,12 +473,20 @@ function detail(t, i){
     `<tr><td class="l">Fin</td><td style="font-size:11px">${t.exit_t?fmtT(t.exit_t):'abierta'}</td></tr>`+
     `<tr><td class="l">Entrada</td><td>${fmt(t.entry_p,dg())}</td></tr>`+
     `<tr><td class="l">Salida</td><td>${t.exit_p?fmt(t.exit_p,dg()):'abierta'}</td></tr>`+
-    `<tr><td class="l">P&amp;L</td><td class="${pnlc}">${fmt(t.pnl,2)} USD</td></tr>`+
+    `<tr><td class="l">P&amp;L neto</td><td class="${pnlc}">${fmt(t.pnl,2)} USD</td></tr>`+
     `<tr><td class="l">R‑múltiplo</td><td class="${r>=0?'pos':'neg'}">${fmt(r,2)} R</td></tr>`+
     `<tr><td class="l">Estado</td><td>${t.estado}</td></tr>`+
     (t.mfe!=null?`<tr><td class="l">Máx. a favor (run‑up)</td><td class="pos">+${fmt(t.mfe,dg())} (${fmt(t.mfe_pct,2)}%)</td></tr>`:'')+
     (t.mae!=null?`<tr><td class="l">Máx. en contra (drawdown)</td><td class="neg">-${fmt(t.mae,dg())} (${fmt(t.mae_pct,2)}%)</td></tr>`:'')+
     `</table>`+
+    (t.bruto!=null?
+    `<h2>Costes de la operación</h2>`+
+    `<table>`+
+    `<tr><td class="l">P&amp;L bruto (precio)</td><td class="${t.bruto>=0?'pos':'neg'}">${fmt(t.bruto,2)} USD</td></tr>`+
+    `<tr><td class="l">Swap</td><td class="${t.swap>=0?'pos':'neg'}">${fmt(t.swap,2)} USD</td></tr>`+
+    `<tr><td class="l">Comisión</td><td class="${t.comision>=0?'pos':'neg'}">${fmt(t.comision,2)} USD</td></tr>`+
+    `<tr><td class="l">P&amp;L neto (= bruto+swap+comisión)</td><td class="${pnlc}">${fmt(t.pnl,2)} USD</td></tr>`+
+    `</table>` : '')+
     `<h2>Pasos del SL (${n})</h2>`+
     `<table>${pasos}</table>`;
 }
@@ -553,6 +561,11 @@ function buildSummary(){
   const sortino = stdDown ? meanR/stdDown : (meanR>0?Infinity:0);
   const payoff = avgLoss!==0 ? Math.abs(avgWin/avgLoss) : (avgWin>0?Infinity:0);
 
+  // costes reales cobrados por el broker (swap + comision) en las operaciones cerradas
+  const totalSwap = cerradas.reduce((a,t)=>a+(t.swap||0),0);
+  const totalComision = cerradas.reduce((a,t)=>a+(t.comision||0),0);
+  const totalCostes = totalSwap + totalComision;
+
   // desglose Long vs Short (equivalente a las columnas All/Long/Short de TradingView)
   function statsPara(lista){
     const w = lista.filter(t=>t.pnl>0), l = lista.filter(t=>t.pnl<=0);
@@ -578,7 +591,7 @@ function buildSummary(){
 
   renderSummaryHTML({capIni,capAct,moneda,pnlTotal,pnlPct,winrate,pf,maxDD,maxDDpct,
                       avgWin,avgLoss,expectancy,best,worst,avgDurH,maxRachaW,maxRachaL,
-                      sharpe,sortino,payoff,longShort,
+                      sharpe,sortino,payoff,longShort,totalSwap,totalComision,totalCostes,
                       nCerradas:cerradas.length, nAbiertas:abiertas.length, eq, dd, bySym, trades});
 }
 
@@ -644,6 +657,9 @@ function renderSummaryHTML(S){
         <div class="kpi"><div class="lbl">Racha máx. perdedora</div><div class="val neg">${S.maxRachaL}</div></div>
         <div class="kpi"><div class="lbl">Sharpe (por operación)</div><div class="val">${fmt(S.sharpe,2)}</div></div>
         <div class="kpi"><div class="lbl">Sortino (por operación)</div><div class="val">${S.sortino===Infinity?'∞':fmt(S.sortino,2)}</div></div>
+        <div class="kpi"><div class="lbl">Swap total</div><div class="val ${S.totalSwap>=0?'pos':'neg'}">${fmt(S.totalSwap,2)} ${S.moneda}</div></div>
+        <div class="kpi"><div class="lbl">Comisión total</div><div class="val ${S.totalComision>=0?'pos':'neg'}">${fmt(S.totalComision,2)} ${S.moneda}</div></div>
+        <div class="kpi"><div class="lbl">Costes totales</div><div class="val neg">${fmt(S.totalCostes,2)} ${S.moneda}</div></div>
       </div>
     </div>
 

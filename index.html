@@ -62,6 +62,9 @@
   .card{background:#0c0c0c;border:1px solid var(--grid);border-radius:10px;padding:14px 16px}
   .card h3{margin:0 0 12px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
   #eqChart{height:220px}
+  #ddChart{height:140px}
+  .sumSection{margin:28px 0 12px}
+  .sumSection h2{font-size:13px;color:#eaf3ff;text-transform:uppercase;letter-spacing:.6px;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--grid)}
   .donutWrap{display:flex;align-items:center;gap:18px}
   .donut{width:140px;height:140px;border-radius:50%;flex:none}
   .donutLeg{font-size:12px;line-height:2}
@@ -612,6 +615,7 @@ function renderSummaryHTML(S){
       <div class="kpi"><div class="lbl">Drawdown máx</div><div class="val" style="color:#ef5350">${fmt(S.maxDDpct,1)}%<span style="font-size:11px;color:var(--muted);font-weight:400"> (${fmt(S.maxDD,2)} ${S.moneda})</span></div></div>
     </div>
 
+    <div class="sumSection"><h2>Visión general</h2></div>
     <div class="sumGrid">
       <div class="card"><h3>Evolución del capital</h3><div id="eqChart"></div></div>
       <div class="card"><h3>P&amp;L por símbolo</h3>
@@ -624,11 +628,10 @@ function renderSummaryHTML(S){
         </div>
       </div>
     </div>
-
     <div class="card" style="margin-bottom:22px"><h3>Drawdown (caída desde el máximo)</h3><div id="ddChart"></div></div>
 
+    <div class="sumSection"><h2>Rendimiento</h2></div>
     <div class="card" style="margin-bottom:22px">
-      <h3>Estadísticas avanzadas</h3>
       <div class="kpis" style="margin:0">
         <div class="kpi"><div class="lbl">Ganancia media</div><div class="val pos">${fmt(S.avgWin,2)} ${S.moneda}</div></div>
         <div class="kpi"><div class="lbl">Pérdida media</div><div class="val neg">${fmt(S.avgLoss,2)} ${S.moneda}</div></div>
@@ -644,8 +647,8 @@ function renderSummaryHTML(S){
       </div>
     </div>
 
+    <div class="sumSection"><h2>Largo vs. corto</h2></div>
     <div class="card" style="margin-bottom:22px">
-      <h3>Largo vs. Corto</h3>
       <table class="sumTbl"><thead><tr>
         <th class="l">Dirección</th><th>Operaciones</th><th>Winrate</th><th>Profit Factor</th><th>P&amp;L</th>
       </tr></thead><tbody>
@@ -658,8 +661,8 @@ function renderSummaryHTML(S){
       </tbody></table>
     </div>
 
+    <div class="sumSection"><h2>Historial de operaciones (${S.trades.length})</h2></div>
     <div class="card">
-      <h3>Todas las operaciones (${S.trades.length})</h3>
       <table class="sumTbl"><thead><tr>
         <th class="l">Fecha entrada</th><th class="l">Símbolo</th><th class="l">Dir</th>
         <th>Entrada</th><th>Salida</th><th>P&amp;L</th><th>R</th><th class="l">Estado</th>

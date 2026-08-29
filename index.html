@@ -108,12 +108,12 @@ const candle = chart.addCandlestickSeries({
 const chanUp = chart.addLineSeries({ color:'#c83cff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 const chanLo = chart.addLineSeries({ color:'#9660ff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 const slLine = chart.addLineSeries({ color:'#2979ff', lineWidth:2, lineType:LightweightCharts.LineType.WithSteps, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
-// lineas que unen el punto de ENTRADA con el de SALIDA de CADA operacion ya terminada
-// (siempre visibles, no solo la seleccionada). Verde fosforescente si gano, amarillo
-// fuerte si perdio. Dos series separadas porque una linea no puede cambiar de color
-// a mitad de camino en Lightweight Charts.
-const winLines  = chart.addLineSeries({ color:'rgba(57,255,20,1)', lineWidth:3, lineStyle:LightweightCharts.LineStyle.Solid, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
-const loseLines = chart.addLineSeries({ color:'rgba(255,255,0,1)', lineWidth:3, lineStyle:LightweightCharts.LineStyle.Solid, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+// linea que une el punto de ENTRADA con el de SALIDA, en forma de "L" (horizontal al
+// precio de entrada, y un salto vertical al precio de salida en el momento del cierre --
+// NO diagonal, para no insinuar un movimiento de precio que no existio). Solo se activa
+// para la operacion que el usuario selecciona (no todas a la vez). Verde fosforescente
+// si gano, amarillo fuerte si perdio.
+const tradeLine = chart.addLineSeries({ color:'rgba(57,255,20,1)', lineWidth:3, lineStyle:LightweightCharts.LineStyle.Solid, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 
 // paleta para numerar cada escalon del SL (SL0 rojo -> verde), igual criterio que MT5
 function stepColor(k, n){
@@ -144,31 +144,6 @@ function donchian(candles, N){
 function fmt(n,d){ return (n==null)?'–':Number(n).toLocaleString('es',{minimumFractionDigits:d,maximumFractionDigits:d}); }
 function fmtT(ts){ if(ts==null) return '–'; const d=new Date(ts*1000); return d.toISOString().slice(0,16).replace('T',' ')+' UTC'; }
 
-// Construye, para TODAS las operaciones ya cerradas, la linea "en L" (entrada -> justo
-// antes del cierre -> salida) y las separa en 2 listas (ganadoras/perdedoras) para poder
-// pintarlas de colores distintos. Entre una operacion y la siguiente de la MISMA lista se
-// inserta un punto "whitespace" (sin value) para que Lightweight Charts NO las conecte
-// entre si con una linea recta -- y todos los tiempos quedan estrictamente ascendentes
-// (la libreria lo exige; timestamps repetidos rompen el repintado del grafico entero).
-function buildResultLines(trades){
-  const cerradas = trades.filter(t=>t.exit_t!=null).slice().sort((a,b)=>a.entry_t-b.entry_t);
-  const win=[], lose=[];
-  let lastWinT=-Infinity, lastLoseT=-Infinity;
-  cerradas.forEach(t=>{
-    const arr = (t.pnl>=0) ? win : lose;
-    const lastT = (t.pnl>=0) ? lastWinT : lastLoseT;
-    let entryT = t.entry_t;
-    if(entryT <= lastT) entryT = lastT + 2; // salvaguarda anti-solape con la anterior de la MISMA lista
-    if(arr.length && (entryT - 1) > lastT) arr.push({time: entryT - 1}); // whitespace: corta la conexion con el trade previo
-    const midT = (t.exit_t - entryT > 1) ? t.exit_t - 1 : null;
-    arr.push({time: entryT, value: t.entry_p});
-    if(midT !== null && midT > entryT) arr.push({time: midT, value: t.entry_p});
-    if(t.exit_t > entryT) arr.push({time: t.exit_t, value: t.exit_p});
-    if(t.pnl>=0) lastWinT = t.exit_t; else lastLoseT = t.exit_t;
-  });
-  return {win, lose};
-}
-
 function render(sym){
   curSym = sym; selTrade = null;
   const S = D.symbols[sym];
@@ -176,13 +151,8 @@ function render(sym){
   candle.setData(cs);
   const dc = donchian(S.candles, 20);
   chanUp.setData(dc.up); chanLo.setData(dc.lo);
-  slLine.setData([]);
+  slLine.setData([]); tradeLine.setData([]);
   clearPriceLines();
-
-  // lineas de entrada->salida de TODAS las operaciones ya cerradas (verde=gano, amarillo=perdio)
-  const rl = buildResultLines(S.trades);
-  winLines.setData(rl.win);
-  loseLines.setData(rl.lose);
 
   // marcadores de ENTRADA (flecha verde/roja, numerada) y de SALIDA (cuadrado blanco,
   // forma y color bien distintos de la flecha de entrada para que se note donde termina)
@@ -208,7 +178,7 @@ function legend(sym, S){
     `<span class="sw" style="background:#c83cff"></span>Canal Donchian máx (20)<br>`+
     `<span class="sw" style="background:#9660ff"></span>Canal Donchian mín (20)<br>`+
     `<span class="sw" style="background:#2979ff"></span>Escalera SL (trade seleccionado)<br>`+
-    `<span class="sw" style="background:rgb(57,255,20)"></span>Entrada↔Salida ganadora &nbsp;`+
+    `<span class="sw" style="background:rgb(57,255,20)"></span>Entrada→Salida (trade seleccionado, ganadora) &nbsp;`+
     `<span class="sw" style="background:rgb(255,255,0)"></span>perdedora<br>`+
     `<span class="sw" style="background:#26c6a6;border-radius:50%;width:8px;height:8px"></span>Flecha = apertura &nbsp;`+
     `<span class="sw" style="background:#ffffff;width:8px;height:8px"></span>Cuadrado blanco = cierre`;
@@ -254,8 +224,21 @@ function selectTrade(i){
 
   // escalera SL (linea escalonada que conecta los puntos, confinada al rango del trade)
   slLine.setData(t.sl_steps.map(s=>({time:s.t, value:s.p})));
-  // (la linea de entrada->salida de esta operacion ya se ve permanentemente via
-  // winLines/loseLines, dibujadas para TODAS las operaciones cerradas en render())
+
+  // linea de entrada->salida SOLO de la operacion seleccionada, en forma de "L"
+  // (horizontal al precio de entrada hasta la penultima vela, luego vertical al precio
+  // de salida en la ultima vela) -- nunca diagonal, y solo para el trade clickeado.
+  const midT = (end - t.entry_t > 1) ? end - 1 : null;
+  const trPts = [{time:t.entry_t, value:t.entry_p}];
+  if(midT !== null && midT > t.entry_t) trPts.push({time:midT, value:t.entry_p});
+  if(end > t.entry_t) trPts.push({time:end, value:endPrice});
+  const isWin = t.pnl >= 0;
+  tradeLine.applyOptions({
+    color: isWin ? 'rgba(57,255,20,1)' : 'rgba(255,255,0,1)',
+    lineWidth: 3,
+    lineStyle: LightweightCharts.LineStyle.Solid
+  });
+  tradeLine.setData(trPts);
 
   // --- solo 2-3 lineas de precio en el grafico (SL0, SL actual, Entrada) para no saturar ---
   clearPriceLines();

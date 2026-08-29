@@ -41,8 +41,9 @@
   .indRow{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;white-space:nowrap}
   .indRow input{accent-color:#2979ff;cursor:pointer;width:13px;height:13px;flex:none}
   .indRow .sw{width:10px;height:10px;border-radius:2px;flex:none;margin:0}
-  .volverBtn{position:absolute;top:8px;right:10px;z-index:6;background:#111;border:1px solid var(--grid);
-             color:#eaf3ff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer}
+  .asideHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .volverBtn{background:#111;border:1px solid var(--grid);
+             color:#eaf3ff;border-radius:6px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer}
   .volverBtn:hover{background:#1c1c1c;border-color:#444}
 
   /* --- Resumen / Cartera (estilo Getquin) --- */
@@ -94,14 +95,16 @@
         <label class="indRow"><input type="checkbox" data-ind="priceLines"><span class="sw" style="background:#ffd54f"></span>Líneas de precio (SL/Entr/Salida)</label>
       </div>
     </div>
-    <button id="btnVolver" class="volverBtn" style="display:none">← Vista general</button>
   </div>
   <aside>
-    <h2>Operaciones</h2>
+    <div class="asideHead">
+      <h2>Operaciones</h2>
+      <button id="btnVolver" class="volverBtn" style="display:none">← Vista general</button>
+    </div>
     <table id="tbl"><thead><tr>
       <th class="l">#</th><th class="l">Dir</th><th>Entrada</th><th>Salida</th><th>P&amp;L</th><th>R</th>
     </tr></thead><tbody id="tbody"></tbody></table>
-    <div class="hint">La vista general muestra el Donchian y la línea de todas las operaciones. Clic en una fila para enfocarla y ver su escalera de SL (SL0→SLk); usa "← Vista general" para volver. Rueda del mouse = zoom · arrastrar = desplazar.</div>
+    <div class="hint">La vista general muestra el Donchian y la línea de TODAS las operaciones. Clic en una fila para enfocar SOLO esa operación (su línea, su escalera de SL SL0→SLk y zoom); usa "← Vista general" para volver a ver todas. Rueda del mouse = zoom · arrastrar = desplazar.</div>
     <div id="detail" style="margin-top:12px"></div>
   </aside>
 </div>
@@ -196,7 +199,11 @@ function applyIndOne(key){
   if(key==='donchUp')    chanUp.applyOptions({visible: indState.donchUp});
   if(key==='donchLo')    chanLo.applyOptions({visible: indState.donchLo});
   if(key==='sl')         slLine.applyOptions({visible: indState.sl});
-  if(key==='tradeLine')  tradeLineSeries.forEach(o=>o.series.applyOptions({visible: indState.tradeLine}));
+  if(key==='tradeLine'){
+    // en la vista general se ven TODAS; si hay un trade seleccionado, SOLO la de ese trade
+    if(selTrade===null) tradeLineSeries.forEach(o=>o.series.applyOptions({visible: indState.tradeLine}));
+    else tradeLineSeries.forEach(o=>o.series.applyOptions({visible: (o.i===selTrade) && indState.tradeLine}));
+  }
   if(key==='markers')    candle.setMarkers(indState.markers ? allMarkers : []);
   if(key==='priceLines') buildPriceLinesFor(curPriceLineTrade);
 }
@@ -312,7 +319,7 @@ function volverVistaGeneral(){
   slLine.setData([]);
   curPriceLineTrade = null;
   clearPriceLines();
-  tradeLineSeries.forEach(o=>o.series.applyOptions({lineWidth:2}));
+  tradeLineSeries.forEach(o=>o.series.applyOptions({lineWidth:2, visible: indState.tradeLine}));
   const S = D.symbols[curSym];
   const cs = S.candles.map(k=>({time:k.t, open:k.o, high:k.h, low:k.l, close:k.c}));
   candle.setData(cs);
@@ -329,8 +336,8 @@ function legend(sym, S){
     `<b>${sym}</b> · H4 · ${S.candles.length} velas<br>`+
     `<span class="sw" style="background:rgb(57,255,20);height:2px;border-bottom:2px dashed rgb(57,255,20)"></span>`+
     `Línea punteada = entrada → salida de cada operación (verde=ganó, amarillo=perdió)<br>`+
-    `<span style="color:var(--muted)">Clic en una operación de la tabla para ver su escalera de SL y hacer zoom · `+
-    `"← Vista general" arriba a la derecha para volver<br>(panel de abajo: mostrar/ocultar cada indicador)</span>`;
+    `<span style="color:var(--muted)">Clic en una fila para enfocar SOLO esa operación (su línea, su SL y zoom) · `+
+    `botón "← Vista general" junto a la tabla para volver<br>(panel de abajo: mostrar/ocultar cada indicador)</span>`;
 }
 
 function buildTable(trades){
@@ -369,9 +376,12 @@ function selectTrade(i){
   // -- SOLO aparece cuando el usuario selecciona una operacion, nunca en la vista general.
   slLine.setData(t.sl_steps.map(s=>({time:s.t, value:s.p})));
 
-  // resaltar la linea diagonal de ESTA operacion entre todas las que ya se ven en la
-  // vista general (mas gruesa que el resto, para distinguirla de un vistazo)
-  tradeLineSeries.forEach(o=>o.series.applyOptions({ lineWidth: (o.i===i ? 4 : 2) }));
+  // al seleccionar una operacion se muestra SOLO su linea (las demas, que se ven todas
+  // juntas en la vista general, se ocultan para no confundir con el trade elegido)
+  tradeLineSeries.forEach(o=>{
+    const isSel = o.i===i;
+    o.series.applyOptions({ lineWidth: isSel?4:2, visible: isSel && indState.tradeLine });
+  });
 
   // --- lineas de precio (SL0, SL actual, Entrada, Salida) -- opcionales via panel ---
   curPriceLineTrade = t;

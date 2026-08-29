@@ -473,6 +473,8 @@ function detail(t, i){
     `<tr><td class="l">P&amp;L</td><td class="${pnlc}">${fmt(t.pnl,2)} USD</td></tr>`+
     `<tr><td class="l">R‑múltiplo</td><td class="${r>=0?'pos':'neg'}">${fmt(r,2)} R</td></tr>`+
     `<tr><td class="l">Estado</td><td>${t.estado}</td></tr>`+
+    (t.mfe!=null?`<tr><td class="l">Máx. a favor (run‑up)</td><td class="pos">+${fmt(t.mfe,dg())} (${fmt(t.mfe_pct,2)}%)</td></tr>`:'')+
+    (t.mae!=null?`<tr><td class="l">Máx. en contra (drawdown)</td><td class="neg">-${fmt(t.mae,dg())} (${fmt(t.mae_pct,2)}%)</td></tr>`:'')+
     `</table>`+
     `<h2>Pasos del SL (${n})</h2>`+
     `<table>${pasos}</table>`;
@@ -518,17 +520,51 @@ function buildSummary(){
   const cronoCierre = cerradas.slice().sort((a,b)=>a.exit_t-b.exit_t);
   let run = capIni;
   const eq = [{time: (cronoCierre[0]?.entry_t)||0, value: capIni}];
+  const dd = [{time: (cronoCierre[0]?.entry_t)||0, value: 0}];
   let peak=capIni, maxDD=0, maxDDpct=0;
   // rachas maximas de wins/losses consecutivas (en el orden en que fueron cerrando)
   let rachaW=0, rachaL=0, maxRachaW=0, maxRachaL=0;
   cronoCierre.forEach(t=>{
     run+=t.pnl; eq.push({time:t.exit_t, value:run});
     peak=Math.max(peak,run);
-    const dd = peak-run; maxDD=Math.max(maxDD,dd);
-    maxDDpct = Math.max(maxDDpct, peak>0 ? dd/peak*100 : 0);
+    const ddAbs = peak-run; maxDD=Math.max(maxDD,ddAbs);
+    const ddPct = peak>0 ? ddAbs/peak*100 : 0;
+    maxDDpct = Math.max(maxDDpct, ddPct);
+    dd.push({time:t.exit_t, value: -ddPct});
     if(t.pnl>0){ rachaW++; rachaL=0; } else { rachaL++; rachaW=0; }
     maxRachaW=Math.max(maxRachaW,rachaW); maxRachaL=Math.max(maxRachaL,rachaL);
   });
+
+  // Sharpe/Sortino "por operacion": media y desvio de los P&L de cada trade
+  // cerrada (no son los de una serie de retornos diarios como en TradingView,
+  // aqui cada "periodo" es un trade -- por eso se etiquetan distinto en la UI).
+  // Payoff ratio = cuanto se gana en promedio por cada unidad que se pierde.
+  const nR = cerradas.length;
+  const meanR = nR ? cerradas.reduce((a,t)=>a+t.pnl,0)/nR : 0;
+  const varR = nR ? cerradas.reduce((a,t)=>a+Math.pow(t.pnl-meanR,2),0)/nR : 0;
+  const stdR = Math.sqrt(varR);
+  const sharpe = stdR ? meanR/stdR : 0;
+  const downside = cerradas.filter(t=>t.pnl<0);
+  const varDown = downside.length ? downside.reduce((a,t)=>a+Math.pow(t.pnl,2),0)/downside.length : 0;
+  const stdDown = Math.sqrt(varDown);
+  const sortino = stdDown ? meanR/stdDown : (meanR>0?Infinity:0);
+  const payoff = avgLoss!==0 ? Math.abs(avgWin/avgLoss) : (avgWin>0?Infinity:0);
+
+  // desglose Long vs Short (equivalente a las columnas All/Long/Short de TradingView)
+  function statsPara(lista){
+    const w = lista.filter(t=>t.pnl>0), l = lista.filter(t=>t.pnl<=0);
+    const sp = w.reduce((a,t)=>a+t.pnl,0), sn = l.reduce((a,t)=>a+t.pnl,0);
+    return {
+      n: lista.length,
+      winrate: lista.length? w.length/lista.length*100 : 0,
+      pf: sn!==0 ? sp/Math.abs(sn) : (sp>0?Infinity:0),
+      pnl: sp+sn,
+    };
+  }
+  const longShort = {
+    long: statsPara(cerradas.filter(t=>t.dir==='compra')),
+    short: statsPara(cerradas.filter(t=>t.dir==='venta')),
+  };
 
   // distribucion P&L por simbolo
   const bySym = SYMS.map((s,i)=>({
@@ -539,7 +575,8 @@ function buildSummary(){
 
   renderSummaryHTML({capIni,capAct,moneda,pnlTotal,pnlPct,winrate,pf,maxDD,maxDDpct,
                       avgWin,avgLoss,expectancy,best,worst,avgDurH,maxRachaW,maxRachaL,
-                      nCerradas:cerradas.length, nAbiertas:abiertas.length, eq, bySym, trades});
+                      sharpe,sortino,payoff,longShort,
+                      nCerradas:cerradas.length, nAbiertas:abiertas.length, eq, dd, bySym, trades});
 }
 
 function donutGradient(bySym){
@@ -588,18 +625,37 @@ function renderSummaryHTML(S){
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:22px"><h3>Drawdown (caída desde el máximo)</h3><div id="ddChart"></div></div>
+
     <div class="card" style="margin-bottom:22px">
       <h3>Estadísticas avanzadas</h3>
       <div class="kpis" style="margin:0">
         <div class="kpi"><div class="lbl">Ganancia media</div><div class="val pos">${fmt(S.avgWin,2)} ${S.moneda}</div></div>
         <div class="kpi"><div class="lbl">Pérdida media</div><div class="val neg">${fmt(S.avgLoss,2)} ${S.moneda}</div></div>
+        <div class="kpi"><div class="lbl">Ratio ganancia/pérdida</div><div class="val">${S.payoff===Infinity?'∞':fmt(S.payoff,2)}</div></div>
         <div class="kpi"><div class="lbl">Expectancia / trade</div><div class="val ${S.expectancy>=0?'pos':'neg'}">${fmt(S.expectancy,2)} ${S.moneda}</div></div>
         <div class="kpi"><div class="lbl">Duración media</div><div class="val">${fmt(S.avgDurH,0)} h</div></div>
         <div class="kpi"><div class="lbl">Mejor operación</div><div class="val pos">${S.best?fmt(S.best.pnl,2):'–'} ${S.moneda}</div></div>
         <div class="kpi"><div class="lbl">Peor operación</div><div class="val neg">${S.worst?fmt(S.worst.pnl,2):'–'} ${S.moneda}</div></div>
         <div class="kpi"><div class="lbl">Racha máx. ganadora</div><div class="val pos">${S.maxRachaW}</div></div>
         <div class="kpi"><div class="lbl">Racha máx. perdedora</div><div class="val neg">${S.maxRachaL}</div></div>
+        <div class="kpi"><div class="lbl">Sharpe (por operación)</div><div class="val">${fmt(S.sharpe,2)}</div></div>
+        <div class="kpi"><div class="lbl">Sortino (por operación)</div><div class="val">${S.sortino===Infinity?'∞':fmt(S.sortino,2)}</div></div>
       </div>
+    </div>
+
+    <div class="card" style="margin-bottom:22px">
+      <h3>Largo vs. Corto</h3>
+      <table class="sumTbl"><thead><tr>
+        <th class="l">Dirección</th><th>Operaciones</th><th>Winrate</th><th>Profit Factor</th><th>P&amp;L</th>
+      </tr></thead><tbody>
+        <tr><td class="l">COMPRA (long)</td><td>${S.longShort.long.n}</td><td>${fmt(S.longShort.long.winrate,1)}%</td>`+
+          `<td>${S.longShort.long.pf===Infinity?'∞':fmt(S.longShort.long.pf,2)}</td>`+
+          `<td class="${S.longShort.long.pnl>=0?'pos':'neg'}">${fmt(S.longShort.long.pnl,2)} ${S.moneda}</td></tr>
+        <tr><td class="l">VENTA (short)</td><td>${S.longShort.short.n}</td><td>${fmt(S.longShort.short.winrate,1)}%</td>`+
+          `<td>${S.longShort.short.pf===Infinity?'∞':fmt(S.longShort.short.pf,2)}</td>`+
+          `<td class="${S.longShort.short.pnl>=0?'pos':'neg'}">${fmt(S.longShort.short.pnl,2)} ${S.moneda}</td></tr>
+      </tbody></table>
     </div>
 
     <div class="card">
@@ -640,6 +696,21 @@ function renderSummaryHTML(S){
   window._eqChart = eqChart;
   new ResizeObserver(()=>eqChart.applyOptions({width:eqEl.clientWidth,height:eqEl.clientHeight})).observe(eqEl);
   eqChart.applyOptions({width:eqEl.clientWidth,height:eqEl.clientHeight});
+
+  const ddEl = document.getElementById('ddChart');
+  if(window._ddChart){ try{ window._ddChart.remove(); }catch(e){} }
+  const ddChart = LightweightCharts.createChart(ddEl, {
+    layout:{ background:{color:'#000000'}, textColor:'#c9d4e5' },
+    grid:{ vertLines:{color:'#141414'}, horzLines:{color:'#141414'} },
+    rightPriceScale:{ borderColor:'#2a2a2a' },
+    timeScale:{ borderColor:'#2a2a2a', timeVisible:true, secondsVisible:false },
+  });
+  const ddArea = ddChart.addAreaSeries({ lineColor:'#ef5350', topColor:'rgba(239,83,80,0)', bottomColor:'rgba(239,83,80,.35)', lineWidth:2 });
+  ddArea.setData(S.dd);
+  ddChart.timeScale().fitContent();
+  window._ddChart = ddChart;
+  new ResizeObserver(()=>ddChart.applyOptions({width:ddEl.clientWidth,height:ddEl.clientHeight})).observe(ddEl);
+  ddChart.applyOptions({width:ddEl.clientWidth,height:ddEl.clientHeight});
 }
 
 function jumpTo(sym, idx){

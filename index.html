@@ -224,6 +224,22 @@ function donchian(candles, N){
   return {up,lo};
 }
 
+// devuelve el timestamp EXACTO de la vela cuyo periodo contiene "ts" (la vela cuya
+// apertura es <= ts y la siguiente abre despues). Esto hace falta porque el precio de
+// SALIDA (SL tocado) puede ejecutarse en cualquier momento DENTRO de una vela H4, no
+// justo en su apertura -- si se usa el timestamp exacto del deal (distinto, aunque sea
+// por minutos, al de la vela) Lightweight Charts lo coloca en un hueco entre barras en
+// vez de sobre la vela real, y la linea/marcador de salida queda "flotando" fuera de ella.
+function barTimeFor(candles, ts){
+  if(!candles.length) return ts;
+  let lo=0, hi=candles.length-1, ans=candles[0].t;
+  while(lo<=hi){
+    const mid=(lo+hi)>>1;
+    if(candles[mid].t<=ts){ ans=candles[mid].t; lo=mid+1; } else hi=mid-1;
+  }
+  return ans;
+}
+
 function fmt(n,d){ return (n==null)?'–':Number(n).toLocaleString('es',{minimumFractionDigits:d,maximumFractionDigits:d}); }
 function fmtT(ts){ if(ts==null) return '–'; const d=new Date(ts*1000); return d.toISOString().slice(0,16).replace('T',' ')+' UTC'; }
 
@@ -242,11 +258,15 @@ function render(sym){
   // forma y color bien distintos de la flecha de entrada para que se note donde termina)
   const mk=[];
   S.trades.forEach((t,i)=>{
-    mk.push({time:t.entry_t, position:(t.dir==='compra'?'belowBar':'aboveBar'),
+    const entryBarT = barTimeFor(S.candles, t.entry_t);
+    mk.push({time:entryBarT, position:(t.dir==='compra'?'belowBar':'aboveBar'),
              color:(t.dir==='compra'?'#26c6a6':'#ef5350'),
              shape:(t.dir==='compra'?'arrowUp':'arrowDown'), text:'#'+(i+1)+' abre', size:0.8});
-    if(t.exit_t) mk.push({time:t.exit_t, position:(t.dir==='compra'?'aboveBar':'belowBar'),
-             color:'#ffffff', shape:'square', text:'#'+(i+1)+' cierra', size:0.75});
+    if(t.exit_t){
+      const exitBarT = barTimeFor(S.candles, t.exit_t);
+      mk.push({time:exitBarT, position:(t.dir==='compra'?'aboveBar':'belowBar'),
+               color:'#ffffff', shape:'square', text:'#'+(i+1)+' cierra', size:0.75});
+    }
   });
   mk.sort((a,b)=>a.time-b.time);
   allMarkers = mk;
@@ -310,8 +330,15 @@ function selectTrade(i){
   // linea diagonal punteada/segmentada que une directamente el punto de ENTRADA
   // con el punto de SALIDA de la operacion seleccionada (solo esa, no todas).
   // Verde si gano, amarillo si perdio.
-  const trPts = [{time:t.entry_t, value:t.entry_p}];
-  if(end > t.entry_t) trPts.push({time:end, value:endPrice});
+  // OJO: el precio de salida (SL tocado) puede ejecutarse en cualquier momento DENTRO
+  // de una vela H4, no justo en su apertura -- si se usa el timestamp exacto del deal
+  // la libreria coloca el punto en un hueco entre barras (se ve "flotando" fuera de la
+  // vela). Se ajusta (snap) al timestamp real de la vela que contiene ese momento.
+  const candsAll = D.symbols[curSym].candles;
+  const entryBarT = barTimeFor(candsAll, t.entry_t);
+  const endBarT = barTimeFor(candsAll, end);
+  const trPts = [{time:entryBarT, value:t.entry_p}];
+  if(endBarT > entryBarT) trPts.push({time:endBarT, value:endPrice});
   const isWin = t.pnl >= 0;
   tradeLine.applyOptions({
     color: isWin ? 'rgba(57,255,20,1)' : 'rgba(255,255,0,1)',

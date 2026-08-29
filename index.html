@@ -128,7 +128,10 @@ const chart = LightweightCharts.createChart(chartEl, {
 });
 const candle = chart.addCandlestickSeries({
   upColor:'#26c6a6', downColor:'#ef5350', borderUpColor:'#26c6a6', borderDownColor:'#ef5350',
-  wickUpColor:'#26c6a6', wickDownColor:'#ef5350'
+  wickUpColor:'#26c6a6', wickDownColor:'#ef5350',
+  // apaga la linea+etiqueta de "ultimo precio" que la libreria dibuja sola por defecto --
+  // no aporta nada sobre el trade y se confundia con las lineas de precio del trade (SL/Entrada/Salida)
+  priceLineVisible:false, lastValueVisible:false
 });
 const chanUp = chart.addLineSeries({ color:'#c83cff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
 const chanLo = chart.addLineSeries({ color:'#9660ff', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });

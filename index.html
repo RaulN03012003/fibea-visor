@@ -119,7 +119,7 @@
 <script>document.write('<scr'+'ipt src="data.js?v='+Date.now()+'"><\/scr'+'ipt>');</script>
 <script>
 const D = window.FIBEA_DATA || {symbols:{}, generado:""};
-document.getElementById('gen').textContent = "datos: " + (D.generado||"");
+document.getElementById('gen').textContent = (D.generado||"").slice(0,10);
 const SYMS = Object.keys(D.symbols);
 let curSym = SYMS[0];
 let selTrade = null;

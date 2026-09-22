@@ -79,6 +79,38 @@
   table.sumTbl tr.trow2{cursor:pointer}
   table.sumTbl tr.trow2:hover{background:#111}
   .symtag{padding:1px 7px;border-radius:6px;font-size:11px;font-weight:700}
+  .tblWrap{overflow-x:auto}
+  .indHead{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .indToggle{pointer-events:auto;cursor:pointer;color:#8a8a8a;font-size:13px;user-select:none;line-height:1}
+  .indPanel.collapsed .indRow{display:none}
+
+  /* --- Móvil (celular, ancho <=700px) --- */
+  @media (max-width:700px){
+    header{padding:8px 10px;gap:8px}
+    header h1{font-size:13px}
+    .gen{width:100%;font-size:10px}
+    .tabs{gap:4px}
+    .tab{padding:4px 9px;font-size:10.5px}
+    .wrap{flex-direction:column;height:auto}
+    #chart{flex:none;height:52vh;min-height:280px}
+    aside{width:100%;border-left:none;border-top:1px solid var(--grid);max-height:none}
+    .overlay{max-width:140px;top:6px;left:6px;gap:4px}
+    .legend{font-size:9.5px;padding:6px 8px;line-height:1.4}
+    .indPanel{font-size:10px;padding:6px 8px;line-height:1.5}
+    .indPanel .indHead{font-size:9px}
+    .indRow .sw{width:9px;height:9px}
+    #summaryView{padding:14px 12px;height:calc(100vh - 90px)}
+    .sumTop{gap:12px}
+    .sumBig{font-size:26px}
+    .sumBig .cur{font-size:12px}
+    .sumDelta{font-size:12px}
+    .sumGrid{grid-template-columns:1fr}
+    .card{padding:12px 12px}
+    .donutWrap{flex-direction:column;align-items:flex-start;gap:10px}
+    .donut{width:110px;height:110px}
+    table.sumTbl{font-size:11px}
+    table.sumTbl th,table.sumTbl td{padding:5px 6px}
+  }
 </style>
 </head>
 <body>
@@ -92,7 +124,7 @@
     <div class="overlay">
       <div class="legend" id="legend"></div>
       <div class="indPanel" id="indPanel">
-        <div class="indHead">Indicadores</div>
+        <div class="indHead">Indicadores <span class="indToggle" id="indToggle">▾</span></div>
         <label class="indRow"><input type="checkbox" data-ind="donchUp"><span class="sw" style="background:#c83cff"></span>Canal Donchian máx</label>
         <label class="indRow"><input type="checkbox" data-ind="donchLo"><span class="sw" style="background:#9660ff"></span>Canal Donchian mín</label>
         <label class="indRow"><input type="checkbox" data-ind="sl"><span class="sw" style="background:#2979ff"></span>Escalera SL</label>
@@ -107,9 +139,9 @@
       <h2>Operaciones</h2>
       <button id="btnVolver" class="volverBtn" style="display:none">← Vista general</button>
     </div>
-    <table id="tbl"><thead><tr>
+    <div class="tblWrap"><table id="tbl"><thead><tr>
       <th class="l">#</th><th class="l">Dir</th><th>Entrada</th><th>Salida</th><th>P&amp;L</th><th>R</th>
-    </tr></thead><tbody id="tbody"></tbody></table>
+    </tr></thead><tbody id="tbody"></tbody></table></div>
     <div class="hint">La vista general muestra el Donchian y la línea de TODAS las operaciones. Clic en una fila para enfocar SOLO esa operación (su línea, su escalera de SL SL0→SLk y zoom); usa "← Vista general" para volver a ver todas. Rueda del mouse = zoom · arrastrar = desplazar.</div>
     <div id="detail" style="margin-top:12px"></div>
   </aside>
@@ -236,6 +268,17 @@ document.querySelectorAll('#indPanel input[type=checkbox]').forEach(cb=>{
   });
 });
 applyIndAll();
+
+// En celular el panel de indicadores puede tapar el gráfico, así que arranca plegado
+// (solo el título visible) si la pantalla es angosta; un toque en el título lo despliega.
+const indPanelEl = document.getElementById('indPanel');
+const indToggleEl = document.getElementById('indToggle');
+function setIndCollapsed(collapsed){
+  indPanelEl.classList.toggle('collapsed', collapsed);
+  indToggleEl.textContent = collapsed ? '▸' : '▾';
+}
+setIndCollapsed(window.innerWidth <= 700);
+indToggleEl.addEventListener('click', ()=> setIndCollapsed(!indPanelEl.classList.contains('collapsed')));
 
 new ResizeObserver(()=>chart.applyOptions({width:chartEl.clientWidth,height:chartEl.clientHeight})).observe(chartEl);
 chart.applyOptions({width:chartEl.clientWidth,height:chartEl.clientHeight});
@@ -668,7 +711,7 @@ function renderSummaryHTML(S){
 
     <div class="sumSection"><h2>Largo vs. corto</h2></div>
     <div class="card" style="margin-bottom:22px">
-      <table class="sumTbl"><thead><tr>
+      <div class="tblWrap"><table class="sumTbl" style="min-width:460px"><thead><tr>
         <th class="l">Dirección</th><th>Operaciones</th><th>Winrate</th><th>Profit Factor</th><th>P&amp;L</th>
       </tr></thead><tbody>
         <tr><td class="l">COMPRA (long)</td><td>${S.longShort.long.n}</td><td>${fmt(S.longShort.long.winrate,1)}%</td>`+
@@ -677,12 +720,12 @@ function renderSummaryHTML(S){
         <tr><td class="l">VENTA (short)</td><td>${S.longShort.short.n}</td><td>${fmt(S.longShort.short.winrate,1)}%</td>`+
           `<td>${S.longShort.short.pf===Infinity?'∞':fmt(S.longShort.short.pf,2)}</td>`+
           `<td class="${S.longShort.short.pnl>=0?'pos':'neg'}">${fmt(S.longShort.short.pnl,2)} ${S.moneda}</td></tr>
-      </tbody></table>
+      </tbody></table></div>
     </div>
 
     <div class="sumSection"><h2>Historial de operaciones (${S.trades.length})</h2></div>
     <div class="card">
-      <table class="sumTbl"><thead><tr>
+      <div class="tblWrap"><table class="sumTbl" style="min-width:640px"><thead><tr>
         <th class="l">Fecha entrada</th><th class="l">Símbolo</th><th class="l">Dir</th>
         <th>Entrada</th><th>Salida</th><th>P&amp;L</th><th>R</th><th class="l">Estado</th>
       </tr></thead><tbody>
@@ -700,7 +743,7 @@ function renderSummaryHTML(S){
             `<td class="${r>=0?'pos':'neg'}">${fmt(r,2)}</td>`+
             `<td class="l">${t.estado}</td></tr>`;
         }).join('')}
-      </tbody></table>
+      </tbody></table></div>
     </div>
   `;
 

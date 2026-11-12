@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>FibEA v1.2 · Visor del bot BreakoutPortfolio (5 simbolos)</title>
+<title>FibEA v1.3 · Visor del bot BreakoutPortfolio (5 simbolos)</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg"/>
 <link rel="icon" type="image/png" sizes="64x64" href="favicon.png"/>
 <link rel="apple-touch-icon" href="favicon.png"/>
@@ -116,6 +116,11 @@
 <body>
 <header>
   <h1>FibEA · Visor BreakoutPortfolio</h1>
+  <select id="verSel" title="Versión del EA" style="background:#111;color:#c9d4e5;border:1px solid #2a2a2a;border-radius:6px;padding:4px 8px;font-size:12px">
+    <option value="v1.3">v1.3 (activa)</option>
+    <option value="todas">Todas</option>
+    <option value="v1.2">v1.2 (archivo)</option>
+  </select>
   <div class="tabs" id="tabs"></div>
   <div class="gen" id="gen"></div>
 </header>
@@ -154,6 +159,19 @@ const D = window.FIBEA_DATA || {symbols:{}, generado:""};
 document.getElementById('gen').textContent = (D.generado||"").slice(0,10);
 const SYMS = Object.keys(D.symbols);
 let curSym = SYMS[0];
+// versiones: cada trade trae t.ver ("v1.2"/"v1.3"). Se conserva la lista completa y se filtra
+// D.symbols[s].trades segun la version elegida (por defecto v1.3, la activa).
+const ORIG = {}; SYMS.forEach(s=>{ ORIG[s] = (D.symbols[s].trades||[]).slice(); });
+let curVer = 'v1.3';
+function applyVersion(v){
+  curVer = v;
+  SYMS.forEach(s=>{ D.symbols[s].trades = ORIG[s].filter(t=> v==='todas' || (t.ver||'v1.2')===v); });
+}
+function verPill(t){
+  const v = t.ver||'v1.2';
+  return `<span style="font-size:9px;padding:1px 4px;border-radius:3px;margin-left:4px;background:${v==='v1.3'?'#1b3a5c':'#2a2a2a'};color:${v==='v1.3'?'#7fc4ff':'#8a8a8a'}">${v}</span>`;
+}
+applyVersion('v1.3');
 let selTrade = null;
 
 const chartEl = document.getElementById('chart');
@@ -413,7 +431,7 @@ function buildTable(trades){
     const pnlc = t.pnl>=0?'pos':'neg';
     const est = t.estado==='abierta' ? ' *' : '';
     tr.innerHTML =
-      `<td class="l">${i+1}${est}</td>`+
+      `<td class="l">${i+1}${est}${verPill(t)}</td>`+
       `<td class="l"><span class="pill ${t.dir==='compra'?'buy':'sell'}">${t.dir==='compra'?'BUY':'SELL'}</span></td>`+
       `<td>${fmt(t.entry_p, dg())}</td>`+
       `<td>${t.exit_p?fmt(t.exit_p,dg()):'abierta'}</td>`+
@@ -556,8 +574,14 @@ function buildSummary(){
   const cerradas = trades.filter(t=>t.estado==='cerrada');
   const abiertas = trades.filter(t=>t.estado!=='cerrada');
 
-  const capIni = cta ? cta.balance_inicial_est : 0;
-  const capAct = cta ? cta.balance_actual : cerradas.reduce((a,t)=>a+t.pnl,0);
+  // capital segun la vista: v1.3 arranca en balance_actual - P&L cerrado v1.3 (~4,756.15 al migrar);
+  // v1.2 arranca en balance_inicial_est y termina sumando solo su P&L; "todas" = cuenta completa.
+  const pnlCerr = cerradas.reduce((a,t)=>a+t.pnl,0);
+  let capIni, capAct;
+  if(!cta){ capIni = 0; capAct = pnlCerr; }
+  else if(curVer==='v1.3'){ capAct = cta.balance_actual; capIni = cta.balance_actual - pnlCerr; }
+  else if(curVer==='v1.2'){ capIni = cta.balance_inicial_est; capAct = capIni + pnlCerr; }
+  else { capIni = cta.balance_inicial_est; capAct = cta.balance_actual; }
   const moneda = cta ? cta.moneda : 'USD';
   const pnlTotal = capAct - capIni;
   const pnlPct = capIni ? (pnlTotal/capIni*100) : 0;
@@ -736,7 +760,7 @@ function renderSummaryHTML(S){
           const r = risk>0 ? ((t.dir==='compra'?(px-t.entry_p):(t.entry_p-px))/risk) : 0;
           return `<tr class="trow2" onclick="jumpTo('${t.sym}',${t.idx})">`+
             `<td class="l" style="font-size:11px;color:var(--muted)">${fmtT(t.entry_t)}</td>`+
-            `<td class="l"><span class="symtag" style="background:#151515">${t.sym}</span></td>`+
+            `<td class="l"><span class="symtag" style="background:#151515">${t.sym}</span>${verPill(t)}</td>`+
             `<td class="l"><span class="pill ${t.dir==='compra'?'buy':'sell'}">${t.dir==='compra'?'BUY':'SELL'}</span></td>`+
             `<td>${fmt(t.entry_p,dgS)}</td><td>${t.exit_p?fmt(t.exit_p,dgS):'abierta'}</td>`+
             `<td class="${t.pnl>=0?'pos':'neg'}">${fmt(t.pnl,2)}</td>`+
@@ -810,6 +834,13 @@ SYMS.forEach((s,idx)=>{
   b.onclick=()=>{ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); showSymbolView(); render(s); };
   tabs.appendChild(b);
 });
+
+document.getElementById('verSel').onchange = e=>{
+  applyVersion(e.target.value);
+  const act = document.querySelector('.tab.active');
+  if(!act || act.textContent==='Resumen'){ showSummaryView(); }
+  else { render(act.textContent); }
+};
 
 if(SYMS.length){ showSummaryView(); }
 else document.getElementById('legend').textContent = "No hay datos (data.js vacío).";
